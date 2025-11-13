@@ -1,0 +1,29 @@
+# Metabase Migrator Configuration File
+# Copy this file to config.yaml and fill in your details
+
+# Metabase instance URL (required)
+metabase_url: https://your-metabase-instance.com
+
+# Authentication Method 1: Username and Password
+username: your-email@example.com
+password: your-password
+
+# Authentication Method 2: API Key (alternative to username/password)
+# Uncomment and use this if you prefer API key authentication
+# api_key: your-api-key-here
+
+# Optional: Custom mapping rules for tables and fields
+# Use these when table or field names differ between databases
+mapping_rules:
+
+  # Table name mappings
+  # Format: source_table_name: target_table_name
+  table_mappings:
+    # Example: legacy_customers: customers
+    # Example: old_orders: orders
+
+  # Field name mappings
+  # Format: table_name.source_field: target_field
+  field_mappings:
+    # Example: customers.cust_id: customer_id
+    # Example: orders.total_price: total_amount
