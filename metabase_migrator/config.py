@@ -4,6 +4,7 @@ import os
 import yaml
 from typing import Dict, Optional
 from pathlib import Path
+from dotenv import load_dotenv
 
 
 class Config:
@@ -16,6 +17,9 @@ class Config:
             config_path: Path to YAML configuration file. If not provided,
                         will look for config.yaml in current directory.
         """
+        # Load .env file if it exists
+        load_dotenv()
+
         self.config_path = config_path or "config.yaml"
         self.config = self._load_config()
 
