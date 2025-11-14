@@ -12,6 +12,7 @@ from .query_analyzer import QueryAnalyzer
 from .database_mapper import DatabaseMapper
 from .query_migrator import QueryMigrator
 from .widget_creator import WidgetCreator
+from .nested_handler import NestedQuestionHandler
 
 
 # Initialize colorama for cross-platform colored output
@@ -89,6 +90,61 @@ def test_connection(config, url, username, password, api_key):
         sys.exit(1)
 
 
+def _migrate_single_question(client, question_id, target_database_id, mapper, migrator,
+                            nested_handler, collection_id, name_suffix, dry_run, return_query_only=False):
+    """Helper function to migrate a single question (for use in nested migrations).
+
+    Returns:
+        If return_query_only: (migrated_query, errors, warnings)
+        Otherwise: created_question
+    """
+    # Fetch question
+    question = client.get_question(question_id)
+    query = question.get('dataset_query', {})
+
+    # Check if this question is also nested
+    is_nested = QueryAnalyzer.is_nested_query(query)
+    migrated_card_id = None
+
+    if is_nested:
+        # Get the source card ID and look up its migrated version
+        source_card_id = QueryAnalyzer.extract_source_card_id(query)
+        if source_card_id and nested_handler:
+            migrated_card_id = nested_handler.migration_cache.get(source_card_id)
+
+    # Migrate the query
+    migrated_query, errors, warnings = migrator.migrate_query(query, target_database_id, migrated_card_id)
+
+    if errors:
+        print_error(f"  Migration failed for question {question_id}:")
+        for error in errors:
+            print_error(f"    - {error}")
+        if return_query_only:
+            return migrated_query, errors, warnings
+        return None
+
+    if warnings:
+        for warning in warnings:
+            print_warning(f"    - {warning}")
+
+    if return_query_only:
+        return migrated_query, errors, warnings
+
+    # Create the migrated question
+    if not dry_run:
+        creator = WidgetCreator(client)
+        created = creator.create_widget(question, migrated_query, collection_id, name_suffix)
+        print_success(f"  Created: Question {created['id']} - {created['name']}")
+
+        # Cache the migration mapping
+        if nested_handler:
+            nested_handler.set_migration_mapping(question_id, created['id'])
+
+        return created
+
+    return None
+
+
 @cli.command()
 @click.argument('question_url_or_id')
 @click.argument('target_database_id', type=int)
@@ -97,7 +153,8 @@ def test_connection(config, url, username, password, api_key):
 @click.option('--name-suffix', default=' (Migrated)', help='Suffix to add to question name')
 @click.option('--dry-run', is_flag=True, help='Preview migration without creating the question')
 @click.option('--show-query', is_flag=True, help='Show the migrated query details')
-def migrate(question_url_or_id, target_database_id, config, collection_id, name_suffix, dry_run, show_query):
+@click.option('--allow-nested', is_flag=True, help='Allow migration of nested questions (questions based on other questions)')
+def migrate(question_url_or_id, target_database_id, config, collection_id, name_suffix, dry_run, show_query, allow_nested):
     """Migrate a question to a different database.
 
     QUESTION_URL_OR_ID: The question ID or URL (e.g., "123" or "https://metabase.com/question/123")
@@ -144,7 +201,11 @@ def migrate(question_url_or_id, target_database_id, config, collection_id, name_
             # Show query summary
             summary = QueryAnalyzer.get_query_summary(source_question)
             print_info("\nQuery Summary:")
-            click.echo(f"  Source Table ID: {summary.get('source_table_id')}")
+            if summary.get('is_nested'):
+                print_warning("  This is a NESTED question (based on another question)")
+                click.echo(f"  Source Question ID: {summary.get('source_card_id')}")
+            else:
+                click.echo(f"  Source Table ID: {summary.get('source_table_id')}")
             click.echo(f"  Referenced Fields: {summary.get('field_count', 0)}")
             if summary.get('has_filters'):
                 click.echo(f"  Has Filters: Yes")
@@ -153,49 +214,94 @@ def migrate(question_url_or_id, target_database_id, config, collection_id, name_
             if summary.get('has_breakouts'):
                 click.echo(f"  Has Breakouts: Yes")
 
+            # Check if nested and handle accordingly
+            is_nested = summary.get('is_nested', False)
+            if is_nested and not allow_nested:
+                print_error("\nThis question is based on another question (nested query).")
+                print_info("To migrate nested questions, use the --allow-nested flag.")
+                print_info("This will automatically migrate all dependencies.")
+                sys.exit(1)
+
             # Create mapper and migrator
             mapper = DatabaseMapper(client, cfg.get_mapping_rules())
-            migrator = QueryMigrator(mapper)
+            nested_handler = NestedQuestionHandler(client) if allow_nested else None
+            migrator = QueryMigrator(mapper, nested_handler)
 
-            # Check database compatibility
-            is_compatible, compat_msg = mapper.validate_database_compatibility(source_db_id, target_database_id)
-            if 'Warning' in compat_msg:
-                print_warning(compat_msg)
+            # Handle nested questions
+            if is_nested:
+                # Analyze dependencies
+                print_info("\nAnalyzing dependencies...")
+                dep_report = nested_handler.get_dependency_report(question_id)
+                click.echo(dep_report)
+
+                # Get migration order
+                migration_order, error = nested_handler.get_migration_order(question_id)
+                if error:
+                    print_error(f"\nDependency analysis failed: {error}")
+                    sys.exit(1)
+
+                print_info(f"\nWill migrate {len(migration_order)} question(s) in order:")
+                for i, qid in enumerate(migration_order, 1):
+                    try:
+                        q = client.get_question(qid)
+                        click.echo(f"  {i}. Question {qid}: {q.get('name', 'Untitled')}")
+                    except:
+                        click.echo(f"  {i}. Question {qid}")
+
+                # Migrate all dependencies
+                if not dry_run:
+                    print_info("\nMigrating dependencies...")
+                    for i, dep_id in enumerate(migration_order[:-1], 1):  # All except last (which is the root)
+                        print_info(f"\n[{i}/{len(migration_order)-1}] Migrating dependency: Question {dep_id}")
+                        _migrate_single_question(client, dep_id, target_database_id, mapper, migrator,
+                                                nested_handler, collection_id, name_suffix, False)
+
+                # Now migrate the root question
+                print_info(f"\nMigrating main question {question_id}...")
+                migrated_query, errors, warnings = _migrate_single_question(
+                    client, question_id, target_database_id, mapper, migrator,
+                    nested_handler, collection_id, name_suffix, dry_run, return_query_only=True
+                )
             else:
-                print_success(compat_msg)
+                # Check database compatibility
+                is_compatible, compat_msg = mapper.validate_database_compatibility(source_db_id, target_database_id)
+                if 'Warning' in compat_msg:
+                    print_warning(compat_msg)
+                else:
+                    print_success(compat_msg)
 
-            # Generate mapping report
-            source_table_id = QueryAnalyzer.extract_source_table(source_query)
-            field_ids = list(QueryAnalyzer.extract_referenced_fields(source_query))
+                # Generate mapping report
+                source_table_id = QueryAnalyzer.extract_source_table(source_query, allow_nested=False)
+                field_ids = list(QueryAnalyzer.extract_referenced_fields(source_query))
 
-            print_info("\nGenerating field mapping report...")
-            mapping_report = mapper.get_mapping_report(source_table_id, target_database_id, field_ids)
+                print_info("\nGenerating field mapping report...")
+                mapping_report = mapper.get_mapping_report(source_table_id, target_database_id, field_ids)
 
-            if mapping_report['errors']:
-                print_error("\nMapping Errors:")
-                for error in mapping_report['errors']:
-                    click.echo(f"  - {error}")
+                if mapping_report['errors']:
+                    print_error("\nMapping Errors:")
+                    for error in mapping_report['errors']:
+                        click.echo(f"  - {error}")
 
-            if mapping_report['warnings']:
-                print_warning("\nMapping Warnings:")
-                for warning in mapping_report['warnings']:
-                    click.echo(f"  - {warning}")
+                if mapping_report['warnings']:
+                    print_warning("\nMapping Warnings:")
+                    for warning in mapping_report['warnings']:
+                        click.echo(f"  - {warning}")
 
-            if mapping_report['mappings']:
-                print_success("\nField Mappings:")
-                table_data = []
-                for mapping in mapping_report['mappings']:
-                    table_data.append([
-                        mapping['source_field'],
-                        mapping['target_field'],
-                        mapping.get('source_type', 'N/A'),
-                        mapping.get('target_type', 'N/A')
-                    ])
-                click.echo(tabulate(table_data, headers=['Source Field', 'Target Field', 'Source Type', 'Target Type']))
+                if mapping_report['mappings']:
+                    print_success("\nField Mappings:")
+                    table_data = []
+                    for mapping in mapping_report['mappings']:
+                        table_data.append([
+                            mapping['source_field'],
+                            mapping['target_field'],
+                            mapping.get('source_type', 'N/A'),
+                            mapping.get('target_type', 'N/A')
+                        ])
+                    click.echo(tabulate(table_data, headers=['Source Field', 'Target Field', 'Source Type', 'Target Type']))
 
-            # Perform migration
-            print_info("\nMigrating query...")
-            migrated_query, errors, warnings = migrator.migrate_query(source_query, target_database_id)
+                # Perform migration
+                print_info("\nMigrating query...")
+                migrated_query, errors, warnings = migrator.migrate_query(source_query, target_database_id)
 
             if errors:
                 print_error("\nMigration Errors:")
@@ -279,10 +385,16 @@ def info(question_url_or_id, config):
             click.echo(f"\n{Fore.CYAN}Query Type:{Style.RESET_ALL}")
             click.echo(f"  {summary['type']}")
 
-            if summary['type'] == 'Query Builder':
+            if summary['type'] in ['Query Builder', 'Query Builder (Nested)']:
                 click.echo(f"\n{Fore.CYAN}Query Details:{Style.RESET_ALL}")
                 click.echo(f"  Database ID: {summary.get('database_id')}")
-                click.echo(f"  Source Table ID: {summary.get('source_table_id')}")
+
+                if summary.get('is_nested'):
+                    print_warning(f"  Is Nested: Yes (based on Question {summary.get('source_card_id')})")
+                    click.echo(f"  Use 'dependencies' command to see full dependency tree")
+                else:
+                    click.echo(f"  Source Table ID: {summary.get('source_table_id')}")
+
                 click.echo(f"  Referenced Fields: {summary.get('field_count', 0)}")
                 click.echo(f"  Has Filters: {'Yes' if summary.get('has_filters') else 'No'}")
                 click.echo(f"  Has Aggregations: {'Yes' if summary.get('has_aggregations') else 'No'}")
@@ -290,12 +402,57 @@ def info(question_url_or_id, config):
                 click.echo(f"  Has Order By: {'Yes' if summary.get('has_order_by') else 'No'}")
                 click.echo(f"  Has Limit: {'Yes' if summary.get('has_limit') else 'No'}")
 
-                print_success("\n✓ This question can be migrated with this tool")
+                if summary.get('is_nested'):
+                    print_success("\n✓ This question can be migrated with the --allow-nested flag")
+                else:
+                    print_success("\n✓ This question can be migrated with this tool")
             else:
                 print_error("\n✗ This question uses native SQL and cannot be migrated")
 
     except Exception as e:
         print_error(f"Failed to get question info: {e}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('question_url_or_id')
+@click.option('--config', default='config.yaml', help='Path to configuration file')
+def dependencies(question_url_or_id, config):
+    """Analyze and display question dependencies (nested questions).
+
+    QUESTION_URL_OR_ID: The question ID or URL
+    """
+    try:
+        cfg = Config(config)
+        metabase_url = cfg.get_metabase_url()
+        credentials = cfg.get_credentials()
+
+        with MetabaseAPIClient(metabase_url, credentials) as client:
+            question_id = client.extract_question_id(question_url_or_id)
+            question = client.get_question(question_id)
+
+            print_info(f"Analyzing dependencies for Question {question_id}: {question['name']}\n")
+
+            # Create nested handler
+            nested_handler = NestedQuestionHandler(client)
+
+            # Get dependency report
+            report = nested_handler.get_dependency_report(question_id)
+            click.echo(report)
+
+            # Get migration order
+            migration_order, error = nested_handler.get_migration_order(question_id)
+
+            if error:
+                print_error(f"\n{error}")
+                sys.exit(1)
+
+            if len(migration_order) > 1:
+                print_info(f"\nTo migrate this question, {len(migration_order)} question(s) need to be migrated:")
+                print_info("Use: ./metabase-migrator migrate --allow-nested to automatically migrate all dependencies")
+
+    except Exception as e:
+        print_error(f"Failed to analyze dependencies: {e}")
         sys.exit(1)
 
 

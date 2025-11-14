@@ -1,7 +1,7 @@
 """Query migrator to transform queries from source to target database."""
 
 import copy
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 from .database_mapper import DatabaseMapper
 from .query_analyzer import QueryAnalyzer
 
@@ -9,22 +9,26 @@ from .query_analyzer import QueryAnalyzer
 class QueryMigrator:
     """Migrates Metabase queries from one database to another."""
 
-    def __init__(self, database_mapper: DatabaseMapper):
+    def __init__(self, database_mapper: DatabaseMapper, nested_handler=None):
         """Initialize query migrator.
 
         Args:
             database_mapper: DatabaseMapper instance for table/field mapping
+            nested_handler: Optional NestedQuestionHandler for handling nested queries
         """
         self.mapper = database_mapper
+        self.nested_handler = nested_handler
         self.errors = []
         self.warnings = []
 
-    def migrate_query(self, source_query: Dict, target_database_id: int) -> Tuple[Dict, List[str], List[str]]:
+    def migrate_query(self, source_query: Dict, target_database_id: int,
+                     migrated_card_id: Optional[int] = None) -> Tuple[Dict, List[str], List[str]]:
         """Migrate a query from source database to target database.
 
         Args:
             source_query: Original query from source database
             target_database_id: Target database ID
+            migrated_card_id: If this is a nested query, the ID of the migrated source card
 
         Returns:
             Tuple of (migrated_query, errors, warnings)
@@ -41,9 +45,29 @@ class QueryMigrator:
             self.errors.append(error)
             return migrated, self.errors, self.warnings
 
+        # Check if this is a nested query
+        is_nested = QueryAnalyzer.is_nested_query(source_query)
+
+        if is_nested:
+            # Handle nested query
+            return self._migrate_nested_query(migrated, target_database_id, migrated_card_id)
+        else:
+            # Handle regular table-based query
+            return self._migrate_table_query(migrated, target_database_id)
+
+    def _migrate_table_query(self, migrated: Dict, target_database_id: int) -> Tuple[Dict, List[str], List[str]]:
+        """Migrate a regular table-based query.
+
+        Args:
+            migrated: Query to migrate (will be modified)
+            target_database_id: Target database ID
+
+        Returns:
+            Tuple of (migrated_query, errors, warnings)
+        """
         # Extract source table
         try:
-            source_table_id = QueryAnalyzer.extract_source_table(source_query)
+            source_table_id = QueryAnalyzer.extract_source_table(migrated, allow_nested=False)
         except Exception as e:
             self.errors.append(f"Failed to extract source table: {e}")
             return migrated, self.errors, self.warnings
@@ -65,6 +89,44 @@ class QueryMigrator:
 
         # Migrate all field references
         self._migrate_query_components(query_dict, source_table_id, target_table_id)
+
+        return migrated, self.errors, self.warnings
+
+    def _migrate_nested_query(self, migrated: Dict, target_database_id: int,
+                             migrated_card_id: Optional[int] = None) -> Tuple[Dict, List[str], List[str]]:
+        """Migrate a nested query (based on another question).
+
+        Args:
+            migrated: Query to migrate (will be modified)
+            target_database_id: Target database ID
+            migrated_card_id: The ID of the already-migrated source card
+
+        Returns:
+            Tuple of (migrated_query, errors, warnings)
+        """
+        if migrated_card_id is None:
+            self.errors.append(
+                "Cannot migrate nested query: Source question must be migrated first. "
+                "Use --allow-nested flag to enable automatic recursive migration."
+            )
+            return migrated, self.errors, self.warnings
+
+        # Update database ID
+        migrated['database'] = target_database_id
+        if 'dataset_query' in migrated:
+            migrated['dataset_query']['database'] = target_database_id
+
+        # Update source card reference
+        query_dict = migrated.get('dataset_query', {}).get('query', migrated.get('query', {}))
+        query_dict['source-table'] = f"card__{migrated_card_id}"
+
+        # Note: For nested queries, field references might use special notation
+        # like ["field", "FIELD_NAME", {"base-type": "type/Text"}]
+        # These don't need table-to-table mapping since they reference the source card's output
+        self.warnings.append(
+            "Nested query migrated. Field references are based on source question output, "
+            "not direct database fields."
+        )
 
         return migrated, self.errors, self.warnings
 

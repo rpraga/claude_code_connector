@@ -1,6 +1,6 @@
 """Query analyzer to validate and understand Metabase queries."""
 
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Optional, Union
 
 
 class QueryAnalyzer:
@@ -65,17 +65,66 @@ class QueryAnalyzer:
             return False, str(e)
 
     @staticmethod
-    def extract_source_table(query: Dict) -> int:
-        """Extract the source table ID from a query.
+    def is_nested_query(query: Dict) -> bool:
+        """Check if a query is based on another question (nested query).
 
         Args:
             query: The query object
 
         Returns:
-            Source table ID
+            True if the query is based on another question, False if based on a table
+        """
+        dataset_query = query.get('dataset_query', query)
+        query_dict = dataset_query.get('query', dataset_query)
+        source_table = query_dict.get('source-table')
+
+        if source_table is None:
+            return False
+
+        # Nested queries have source-table like "card__123"
+        if isinstance(source_table, str) and source_table.startswith('card__'):
+            return True
+
+        return False
+
+    @staticmethod
+    def extract_source_card_id(query: Dict) -> Optional[int]:
+        """Extract the source card/question ID from a nested query.
+
+        Args:
+            query: The query object
+
+        Returns:
+            Source card ID if this is a nested query, None otherwise
+        """
+        dataset_query = query.get('dataset_query', query)
+        query_dict = dataset_query.get('query', dataset_query)
+        source_table = query_dict.get('source-table')
+
+        if source_table and isinstance(source_table, str) and source_table.startswith('card__'):
+            # Extract ID from "card__123"
+            card_id_str = source_table.replace('card__', '')
+            try:
+                return int(card_id_str)
+            except ValueError:
+                return None
+
+        return None
+
+    @staticmethod
+    def extract_source_table(query: Dict, allow_nested: bool = False) -> Union[int, str]:
+        """Extract the source table ID or card reference from a query.
+
+        Args:
+            query: The query object
+            allow_nested: If True, returns card reference for nested queries.
+                         If False, raises error for nested queries.
+
+        Returns:
+            Source table ID (int) or card reference (str like "card__123")
 
         Raises:
-            ValueError: If source table cannot be determined
+            ValueError: If source table cannot be determined or nested query when not allowed
         """
         # Handle both formats: direct query and wrapped in dataset_query
         dataset_query = query.get('dataset_query', query)
@@ -86,14 +135,17 @@ class QueryAnalyzer:
         if source_table is None:
             raise ValueError("Could not find source-table in query")
 
-        # Handle string IDs (convert to int)
+        # Handle string IDs
         if isinstance(source_table, str):
             # Some source tables might be card references like "card__123"
             if source_table.startswith('card__'):
-                raise ValueError(
-                    "Query uses another question as source (nested query). "
-                    "This migrator currently only supports direct table queries."
-                )
+                if not allow_nested:
+                    card_id = source_table.replace('card__', '')
+                    raise ValueError(
+                        f"Query uses another question (ID: {card_id}) as source (nested query). "
+                        f"Use --allow-nested flag to migrate nested questions."
+                    )
+                return source_table  # Return as-is for nested queries
             source_table = int(source_table)
 
         return source_table
@@ -155,7 +207,16 @@ class QueryAnalyzer:
 
         if is_qb:
             try:
-                summary['source_table_id'] = QueryAnalyzer.extract_source_table(query)
+                # Check if it's a nested query
+                is_nested = QueryAnalyzer.is_nested_query(query)
+                summary['is_nested'] = is_nested
+
+                if is_nested:
+                    summary['source_card_id'] = QueryAnalyzer.extract_source_card_id(query)
+                    summary['type'] = 'Query Builder (Nested)'
+                else:
+                    summary['source_table_id'] = QueryAnalyzer.extract_source_table(query, allow_nested=False)
+
                 summary['referenced_fields'] = list(QueryAnalyzer.extract_referenced_fields(query))
                 summary['field_count'] = len(summary['referenced_fields'])
 

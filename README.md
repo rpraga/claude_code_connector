@@ -5,12 +5,15 @@ A powerful command-line tool to migrate Metabase questions (widgets) from one da
 ## Features
 
 - **Query Builder Only**: Works exclusively with Query Builder queries (not native SQL)
+- **Nested Questions Support**: ✨ NEW! Automatically migrates questions based on other questions with `--allow-nested` flag
 - **Automatic Field Mapping**: Intelligently maps tables and fields between databases
+- **Dependency Resolution**: Detects and migrates question dependencies in the correct order
 - **Structure Preservation**: Maintains all query components (filters, aggregations, breakouts, joins)
 - **Visualization Settings**: Copies visualization settings and parameters
 - **Dry Run Mode**: Preview migrations before executing them
 - **Custom Mappings**: Support for custom table/field name mappings
 - **Detailed Reporting**: Shows field mappings, type mismatches, and potential issues
+- **Circular Reference Detection**: Prevents infinite loops in nested question chains
 - **Multiple Authentication Methods**: Supports username/password and API key authentication
 
 ## Requirements
@@ -286,11 +289,11 @@ mapping_rules:
 - Custom columns (expressions)
 - Multiple aggregations
 - Nested filters (AND/OR)
+- **Nested questions** (questions based on other questions) - Use `--allow-nested` flag
 
 ### ❌ Not Supported
 
 - Native SQL queries
-- Questions based on other questions (nested questions)
 - Custom SQL snippets
 - Database-specific functions
 
@@ -301,6 +304,17 @@ mapping_rules:
 **Problem**: The question uses native SQL instead of Query Builder.
 
 **Solution**: Recreate the question using Query Builder, or manually migrate the SQL query.
+
+### "This question is based on another question (nested query)"
+
+**Problem**: The question is nested and `--allow-nested` flag was not used.
+
+**Solution**: Use the `--allow-nested` flag to automatically migrate all dependencies:
+```bash
+./metabase-migrator migrate 123 2 --allow-nested
+```
+
+See [NESTED_QUESTIONS.md](NESTED_QUESTIONS.md) for detailed nested question migration guide.
 
 ### "Table 'xyz' not found in target database"
 
