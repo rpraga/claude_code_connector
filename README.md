@@ -223,6 +223,29 @@ Ensure migrated questions produce the same results:
 
 See [VERIFICATION.md](VERIFICATION.md) for complete verification guide.
 
+### Migrate Entire Collections
+
+Migrate all questions from a collection at once:
+
+```bash
+# List collections
+./metabase-migrator list-collections
+
+# Analyze a collection
+./metabase-migrator analyze-collection 10
+
+# Migrate entire collection
+./metabase-migrator migrate-collection 10 2
+
+# With database filtering and verification
+./metabase-migrator migrate-collection 10 2 \
+  --source-database-id 1 \
+  --verify \
+  --save-mapping report.csv
+```
+
+See [COLLECTION_MIGRATION.md](COLLECTION_MIGRATION.md) for complete collection migration guide.
+
 ### Complete Example
 
 ```bash
@@ -240,6 +263,9 @@ See [VERIFICATION.md](VERIFICATION.md) for complete verification guide.
 
 # 5. Perform the migration
 ./metabase-migrator migrate 456 2 --collection-id 10
+
+# 6. Verify the migration
+./metabase-migrator verify 456 789
 ```
 
 ## Migration Process

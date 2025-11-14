@@ -233,6 +233,77 @@ class MetabaseAPIClient:
         response.raise_for_status()
         return response.json()
 
+    def list_collections(self) -> List[Dict]:
+        """List all available collections.
+
+        Returns:
+            List of collection objects
+        """
+        response = self.session.get(f"{self.base_url}/api/collection")
+        response.raise_for_status()
+        return response.json()
+
+    def get_collection_items(self, collection_id: int) -> List[Dict]:
+        """Get all items (questions, dashboards) in a collection.
+
+        Args:
+            collection_id: The ID of the collection
+
+        Returns:
+            List of items in the collection
+        """
+        response = self.session.get(f"{self.base_url}/api/collection/{collection_id}/items")
+        response.raise_for_status()
+        data = response.json()
+        return data.get('data', [])
+
+    def create_collection(self, name: str, description: str = "", parent_id: Optional[int] = None,
+                         color: str = "#509EE3") -> Dict:
+        """Create a new collection.
+
+        Args:
+            name: Collection name
+            description: Collection description
+            parent_id: Parent collection ID (None for root level)
+            color: Collection color hex code
+
+        Returns:
+            Created collection data with ID
+        """
+        collection_data = {
+            'name': name,
+            'description': description,
+            'color': color
+        }
+
+        if parent_id is not None:
+            collection_data['parent_id'] = parent_id
+
+        response = self.session.post(
+            f"{self.base_url}/api/collection",
+            json=collection_data
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def search_collections(self, name: str) -> List[Dict]:
+        """Search for collections by name.
+
+        Args:
+            name: Collection name to search for
+
+        Returns:
+            List of matching collections
+        """
+        collections = self.list_collections()
+
+        matching = []
+        for collection in collections:
+            if collection['name'].lower() == name.lower():
+                matching.append(collection)
+
+        return matching
+
     def close(self):
         """Close the session and cleanup."""
         if self.session_token:

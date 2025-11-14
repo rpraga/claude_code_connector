@@ -14,6 +14,7 @@ from .query_migrator import QueryMigrator
 from .widget_creator import WidgetCreator
 from .nested_handler import NestedQuestionHandler
 from .verifier import QuestionVerifier
+from .collection_migrator import CollectionMigrator
 
 
 # Initialize colorama for cross-platform colored output
@@ -696,6 +697,222 @@ def batch_verify(mapping_file, config, sample_size, show_failures):
 
     except Exception as e:
         print_error(f"Batch verification failed: {e}")
+        import traceback
+        if '--debug' in sys.argv:
+            traceback.print_exc()
+        sys.exit(1)
+
+
+@cli.command()
+@click.option('--config', default='config.yaml', help='Path to configuration file')
+def list_collections(config):
+    """List all collections."""
+    try:
+        cfg = Config(config)
+        metabase_url = cfg.get_metabase_url()
+        credentials = cfg.get_credentials()
+
+        with MetabaseAPIClient(metabase_url, credentials) as client:
+            collections = client.list_collections()
+
+            if not collections:
+                print_warning("No collections found")
+                return
+
+            print_success(f"Found {len(collections)} collection(s):\n")
+
+            table_data = []
+            for col in collections:
+                table_data.append([
+                    col.get('id', 'N/A'),
+                    col.get('name', 'Untitled'),
+                    col.get('description', '')[:50] if col.get('description') else ''
+                ])
+
+            click.echo(tabulate(table_data, headers=['ID', 'Name', 'Description']))
+
+    except Exception as e:
+        print_error(f"Failed to list collections: {e}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('collection_id', type=int)
+@click.option('--config', default='config.yaml', help='Path to configuration file')
+@click.option('--database-id', type=int, help='Filter by database ID')
+def analyze_collection(collection_id, config, database_id):
+    """Analyze a collection and show which questions can be migrated.
+
+    COLLECTION_ID: The ID of the collection to analyze
+    """
+    try:
+        cfg = Config(config)
+        metabase_url = cfg.get_metabase_url()
+        credentials = cfg.get_credentials()
+
+        with MetabaseAPIClient(metabase_url, credentials) as client:
+            migrator = CollectionMigrator(client)
+
+            print_info(f"Analyzing collection {collection_id}...\n")
+
+            analysis = migrator.analyze_collection(collection_id, database_id)
+
+            click.echo(f"{Fore.CYAN}Collection: {analysis['collection_name']}{Style.RESET_ALL}")
+            click.echo(f"  Total Items: {analysis['total_items']}")
+
+            stats = analysis['statistics']
+            click.echo(f"\n{Fore.CYAN}Statistics:{Style.RESET_ALL}")
+            click.echo(f"  Total Questions: {stats['total_questions']}")
+            click.echo(f"  Migratable: {Fore.GREEN}{stats['migratable']}{Style.RESET_ALL}")
+            click.echo(f"  Non-Migratable: {Fore.RED}{stats['non_migratable']}{Style.RESET_ALL}")
+            click.echo(f"  Nested Questions: {Fore.YELLOW}{stats['nested_questions']}{Style.RESET_ALL}")
+            click.echo(f"  Other Items: {stats['other_items']}")
+
+            if analysis['migratable']:
+                print_success(f"\n{len(analysis['migratable'])} question(s) can be migrated:")
+                for q in analysis['migratable']:
+                    status = " [NESTED]" if q.get('is_nested') else ""
+                    click.echo(f"  • {q['id']}: {q['name']}{status}")
+
+            if analysis['non_migratable']:
+                print_warning(f"\n{len(analysis['non_migratable'])} question(s) cannot be migrated:")
+                for q in analysis['non_migratable'][:10]:
+                    reason = q.get('error', q.get('skip_reason', 'Unknown'))
+                    click.echo(f"  • {q['id']}: {q['name']} - {reason}")
+                if len(analysis['non_migratable']) > 10:
+                    click.echo(f"  ... and {len(analysis['non_migratable']) - 10} more")
+
+    except Exception as e:
+        print_error(f"Failed to analyze collection: {e}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('source_collection_id', type=int)
+@click.argument('target_database_id', type=int)
+@click.option('--config', default='config.yaml', help='Path to configuration file')
+@click.option('--target-collection-name', help='Name for the target collection')
+@click.option('--source-database-id', type=int, help='Only migrate questions from this database')
+@click.option('--allow-nested', is_flag=True, help='Allow migration of nested questions')
+@click.option('--name-suffix', default=' (Migrated)', help='Suffix to add to question names')
+@click.option('--dry-run', is_flag=True, help='Preview migration without creating anything')
+@click.option('--verify', is_flag=True, help='Verify migrated questions after creation')
+@click.option('--save-mapping', help='Save migration mapping to CSV file')
+def migrate_collection(source_collection_id, target_database_id, config, target_collection_name,
+                       source_database_id, allow_nested, name_suffix, dry_run, verify, save_mapping):
+    """Migrate all questions from a collection to a new collection.
+
+    SOURCE_COLLECTION_ID: The source collection ID
+
+    TARGET_DATABASE_ID: The target database ID for migrated questions
+    """
+    try:
+        cfg = Config(config)
+        metabase_url = cfg.get_metabase_url()
+        credentials = cfg.get_credentials()
+
+        with MetabaseAPIClient(metabase_url, credentials) as client:
+            migrator = CollectionMigrator(client)
+
+            # Analyze first
+            print_info("Analyzing source collection...")
+            analysis = migrator.analyze_collection(source_collection_id, source_database_id)
+
+            click.echo(f"\n{Fore.CYAN}Source Collection:{Style.RESET_ALL} {analysis['collection_name']}")
+            click.echo(f"  Questions to migrate: {len(analysis['migratable'])}")
+
+            if not analysis['migratable']:
+                print_warning("No questions to migrate!")
+                sys.exit(0)
+
+            # Check for nested questions
+            nested_count = sum(1 for q in analysis['migratable'] if q.get('is_nested'))
+            if nested_count > 0 and not allow_nested:
+                print_warning(f"\n{nested_count} nested question(s) found. Use --allow-nested to migrate them.")
+
+            # Perform migration
+            if dry_run:
+                print_info("\n--- DRY RUN MODE ---")
+
+            print_info("\nMigrating collection...")
+
+            report = migrator.migrate_collection(
+                source_collection_id=source_collection_id,
+                target_database_id=target_database_id,
+                target_collection_name=target_collection_name,
+                source_database_id=source_database_id,
+                allow_nested=allow_nested,
+                name_suffix=name_suffix,
+                dry_run=dry_run
+            )
+
+            # Show results
+            stats = report['statistics']
+
+            click.echo(f"\n{Fore.CYAN}Migration Results:{Style.RESET_ALL}")
+            if not dry_run:
+                click.echo(f"  Target Collection: {report['target_collection_name']} (ID: {report['target_collection_id']})")
+            click.echo(f"  Total: {stats['total']}")
+            click.echo(f"  Migrated: {Fore.GREEN}{stats['migrated']}{Style.RESET_ALL}")
+            click.echo(f"  Failed: {Fore.RED}{stats['failed']}{Style.RESET_ALL}")
+            click.echo(f"  Skipped: {Fore.YELLOW}{stats['skipped']}{Style.RESET_ALL}")
+
+            if report['migrations']:
+                print_success(f"\n{len(report['migrations'])} question(s) migrated:")
+                for m in report['migrations']:
+                    if 'target_id' in m:
+                        click.echo(f"  • {m['source_name']} ({m['source_id']} → {m['target_id']})")
+                    else:
+                        click.echo(f"  • {m['source_name']} (would migrate)")
+
+            if report['failed']:
+                print_error(f"\n{len(report['failed'])} question(s) failed:")
+                for f in report['failed']:
+                    click.echo(f"  • {f['name']} (ID: {f['question_id']})")
+                    if 'errors' in f:
+                        for err in f['errors']:
+                            click.echo(f"    - {err}")
+
+            if report['skipped']:
+                print_warning(f"\n{len(report['skipped'])} question(s) skipped:")
+                for s in report['skipped']:
+                    click.echo(f"  • {s['name']} (ID: {s['question_id']}): {s['reason']}")
+
+            # Save mapping
+            if save_mapping and not dry_run:
+                csv_content = migrator.get_migration_mapping_csv(report)
+                with open(save_mapping, 'w') as f:
+                    f.write(csv_content)
+                print_success(f"\nMapping saved to: {save_mapping}")
+
+            # Verify if requested
+            if verify and not dry_run and report['migrations']:
+                print_info("\nVerifying migrated questions...")
+                from .verifier import QuestionVerifier
+
+                verifier = QuestionVerifier(client)
+                pairs = [(m['source_id'], m['target_id']) for m in report['migrations'] if 'target_id' in m]
+
+                verify_reports = verifier.batch_verify(pairs, sample_size=100)
+                summary = verifier.get_summary_report(verify_reports)
+
+                click.echo(f"\n{Fore.CYAN}Verification Results:{Style.RESET_ALL}")
+                click.echo(f"  Passed: {Fore.GREEN}{summary['passed']}{Style.RESET_ALL}")
+                click.echo(f"  Failed: {Fore.RED}{summary['failed']}{Style.RESET_ALL}")
+                click.echo(f"  Pass Rate: {summary['pass_rate']:.1f}%")
+
+                if summary['failed'] > 0:
+                    print_warning("\nSome verifications failed. Review the migrations above.")
+
+            if dry_run:
+                print_success("\nDry run completed. No questions were created.")
+            elif stats['migrated'] > 0:
+                print_success(f"\n✓ Collection migration completed!")
+                if not dry_run:
+                    click.echo(f"View target collection: {metabase_url}/collection/{report['target_collection_id']}")
+
+    except Exception as e:
+        print_error(f"Collection migration failed: {e}")
         import traceback
         if '--debug' in sys.argv:
             traceback.print_exc()
