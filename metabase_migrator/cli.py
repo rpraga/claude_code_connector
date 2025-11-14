@@ -13,6 +13,7 @@ from .database_mapper import DatabaseMapper
 from .query_migrator import QueryMigrator
 from .widget_creator import WidgetCreator
 from .nested_handler import NestedQuestionHandler
+from .verifier import QuestionVerifier
 
 
 # Initialize colorama for cross-platform colored output
@@ -487,6 +488,217 @@ def list_databases(config):
 
     except Exception as e:
         print_error(f"Failed to list databases: {e}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('source_question_id', type=int)
+@click.argument('target_question_id', type=int)
+@click.option('--config', default='config.yaml', help='Path to configuration file')
+@click.option('--sample-size', type=int, default=100, help='Number of rows to sample for comparison (default: 100, use 0 for all rows)')
+@click.option('--limit', type=int, help='Maximum rows to fetch from each question')
+@click.option('--show-details', is_flag=True, help='Show detailed differences')
+def verify(source_question_id, target_question_id, config, sample_size, limit, show_details):
+    """Verify that a migrated question produces the same results as the source.
+
+    SOURCE_QUESTION_ID: The original question ID
+
+    TARGET_QUESTION_ID: The migrated question ID
+    """
+    try:
+        cfg = Config(config)
+        metabase_url = cfg.get_metabase_url()
+        credentials = cfg.get_credentials()
+
+        print_info(f"Verifying migration: Question {source_question_id} → {target_question_id}")
+
+        with MetabaseAPIClient(metabase_url, credentials) as client:
+            verifier = QuestionVerifier(client)
+
+            # Execute verification
+            sample = sample_size if sample_size > 0 else None
+            print_info(f"Executing queries and comparing results...")
+
+            if sample:
+                print_info(f"Using random sample of {sample} rows")
+            else:
+                print_info("Comparing all rows")
+
+            report = verifier.verify_migration(
+                source_question_id,
+                target_question_id,
+                sample_size=sample,
+                limit=limit
+            )
+
+            # Display results
+            click.echo(f"\n{Fore.CYAN}Verification Results:{Style.RESET_ALL}")
+            click.echo(f"  Source Question: {report.get('source_question_name')} (ID: {source_question_id})")
+            click.echo(f"  Target Question: {report.get('target_question_name')} (ID: {target_question_id})")
+
+            if report.get('errors'):
+                print_error("\nVerification Errors:")
+                for error in report['errors']:
+                    click.echo(f"  - {error['type']}: {error['message']}")
+                sys.exit(1)
+
+            # Execution times
+            exec_times = report.get('execution_times', {})
+            if exec_times:
+                click.echo(f"\n{Fore.CYAN}Execution Times:{Style.RESET_ALL}")
+                click.echo(f"  Source: {exec_times.get('source', 0):.2f}s")
+                click.echo(f"  Target: {exec_times.get('target', 0):.2f}s")
+
+            # Statistics
+            comparison = report.get('comparison', {})
+            stats = comparison.get('statistics', {})
+
+            click.echo(f"\n{Fore.CYAN}Statistics:{Style.RESET_ALL}")
+            click.echo(f"  Source Rows: {stats.get('source_row_count', 0)}")
+            click.echo(f"  Target Rows: {stats.get('target_row_count', 0)}")
+            click.echo(f"  Source Columns: {stats.get('source_column_count', 0)}")
+            click.echo(f"  Target Columns: {stats.get('target_column_count', 0)}")
+            click.echo(f"  Rows Checked: {stats.get('rows_checked', 0)}")
+
+            if stats.get('mismatched_values'):
+                click.echo(f"  Mismatched Values: {stats['mismatched_values']}")
+
+            # Result
+            if report.get('verified'):
+                print_success(f"\n✓ VERIFICATION PASSED")
+                click.echo("  The migrated question produces the same results as the source.")
+            else:
+                print_error(f"\n✗ VERIFICATION FAILED")
+                click.echo("  The migrated question produces different results.")
+
+                # Show differences
+                differences = comparison.get('differences', [])
+                if differences:
+                    print_warning(f"\nFound {len(differences)} type(s) of differences:")
+
+                    for diff in differences:
+                        diff_type = diff.get('type')
+                        click.echo(f"\n  • {diff_type}:")
+
+                        if diff_type == 'row_count_mismatch':
+                            click.echo(f"    Source: {diff['source']} rows")
+                            click.echo(f"    Target: {diff['target']} rows")
+                            click.echo(f"    Difference: {diff['difference']} rows")
+
+                        elif diff_type == 'column_count_mismatch':
+                            click.echo(f"    Source: {diff['source']} columns")
+                            click.echo(f"    Target: {diff['target']} columns")
+
+                        elif diff_type == 'column_name_mismatch' and show_details:
+                            click.echo(f"    Mismatched columns:")
+                            for detail in diff.get('details', [])[:10]:
+                                click.echo(f"      Column {detail['column_index']}: "
+                                         f"'{detail['source_name']}' → '{detail['target_name']}'")
+
+                        elif diff_type == 'data_value_mismatch':
+                            click.echo(f"    Total mismatched values: {diff['count']}")
+                            if show_details:
+                                click.echo(f"    First 10 differences:")
+                                for detail in diff.get('details', []):
+                                    click.echo(f"      Row {detail['row_index']}, "
+                                             f"Column '{detail['column_name']}': "
+                                             f"{detail['source_value']} → {detail['target_value']}")
+
+                if not show_details:
+                    print_info("\nUse --show-details to see detailed differences")
+
+                sys.exit(1)
+
+    except Exception as e:
+        print_error(f"Verification failed: {e}")
+        import traceback
+        if '--debug' in sys.argv:
+            traceback.print_exc()
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('mapping_file', type=click.Path(exists=True))
+@click.option('--config', default='config.yaml', help='Path to configuration file')
+@click.option('--sample-size', type=int, default=100, help='Number of rows to sample for comparison')
+@click.option('--show-failures', is_flag=True, help='Show detailed failures')
+def batch_verify(mapping_file, config, sample_size, show_failures):
+    """Verify multiple migrated questions from a mapping file.
+
+    MAPPING_FILE: CSV file with source_id,target_id pairs (one per line)
+
+    Example mapping file:
+      123,456
+      124,457
+      125,458
+    """
+    try:
+        cfg = Config(config)
+        metabase_url = cfg.get_metabase_url()
+        credentials = cfg.get_credentials()
+
+        # Load mapping file
+        import csv
+        question_pairs = []
+
+        with open(mapping_file, 'r') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if len(row) >= 2:
+                    try:
+                        source_id = int(row[0].strip())
+                        target_id = int(row[1].strip())
+                        question_pairs.append((source_id, target_id))
+                    except ValueError:
+                        print_warning(f"Skipping invalid row: {row}")
+
+        if not question_pairs:
+            print_error("No valid question pairs found in mapping file")
+            sys.exit(1)
+
+        print_info(f"Loaded {len(question_pairs)} question pair(s) from {mapping_file}")
+
+        with MetabaseAPIClient(metabase_url, credentials) as client:
+            verifier = QuestionVerifier(client)
+
+            # Batch verify
+            sample = sample_size if sample_size > 0 else None
+            print_info(f"Verifying {len(question_pairs)} question pair(s)...\n")
+
+            reports = verifier.batch_verify(question_pairs, sample_size=sample)
+
+            # Generate summary
+            summary = verifier.get_summary_report(reports)
+
+            # Display results
+            click.echo(f"{Fore.CYAN}Batch Verification Results:{Style.RESET_ALL}")
+            click.echo(f"  Total Verified: {summary['total_verified']}")
+            click.echo(f"  Passed: {Fore.GREEN}{summary['passed']}{Style.RESET_ALL}")
+            click.echo(f"  Failed: {Fore.RED}{summary['failed']}{Style.RESET_ALL}")
+            click.echo(f"  Errors: {Fore.YELLOW}{summary['errors']}{Style.RESET_ALL}")
+            click.echo(f"  Pass Rate: {summary['pass_rate']:.1f}%")
+
+            # Show failures if requested
+            if show_failures and summary['failed_questions']:
+                print_warning(f"\nFailed Verifications:")
+
+                for i, failed in enumerate(summary['failed_questions'], 1):
+                    click.echo(f"\n{i}. {failed['source_name']} ({failed['source_id']} → {failed['target_id']})")
+
+                    for diff in failed.get('differences', []):
+                        click.echo(f"   • {diff.get('type')}")
+
+            # Exit code based on results
+            if summary['failed'] > 0 or summary['errors'] > 0:
+                sys.exit(1)
+            else:
+                print_success(f"\n✓ All verifications passed!")
+
+    except Exception as e:
+        print_error(f"Batch verification failed: {e}")
+        import traceback
+        if '--debug' in sys.argv:
+            traceback.print_exc()
         sys.exit(1)
 
 

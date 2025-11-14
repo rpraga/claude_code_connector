@@ -5,7 +5,8 @@ A powerful command-line tool to migrate Metabase questions (widgets) from one da
 ## Features
 
 - **Query Builder Only**: Works exclusively with Query Builder queries (not native SQL)
-- **Nested Questions Support**: ✨ NEW! Automatically migrates questions based on other questions with `--allow-nested` flag
+- **Nested Questions Support**: ✨ Automatically migrates questions based on other questions with `--allow-nested` flag
+- **Result Verification**: ✨ NEW! Verify migrated questions produce correct results with random sampling
 - **Automatic Field Mapping**: Intelligently maps tables and fields between databases
 - **Dependency Resolution**: Detects and migrates question dependencies in the correct order
 - **Structure Preservation**: Maintains all query components (filters, aggregations, breakouts, joins)
@@ -14,6 +15,7 @@ A powerful command-line tool to migrate Metabase questions (widgets) from one da
 - **Custom Mappings**: Support for custom table/field name mappings
 - **Detailed Reporting**: Shows field mappings, type mismatches, and potential issues
 - **Circular Reference Detection**: Prevents infinite loops in nested question chains
+- **Batch Operations**: Migrate and verify multiple questions at once
 - **Multiple Authentication Methods**: Supports username/password and API key authentication
 
 ## Requirements
@@ -200,6 +202,26 @@ Perform the actual migration:
 # Show full query details
 ./metabase-migrator migrate 123 2 --show-query
 ```
+
+### Verify Migration Results
+
+Ensure migrated questions produce the same results:
+
+```bash
+# Verify a single question (compares 100 random rows)
+./metabase-migrator verify 123 456
+
+# Compare ALL rows
+./metabase-migrator verify 123 456 --sample-size 0
+
+# Show detailed differences
+./metabase-migrator verify 123 456 --show-details
+
+# Batch verify multiple questions
+./metabase-migrator batch-verify mappings.csv
+```
+
+See [VERIFICATION.md](VERIFICATION.md) for complete verification guide.
 
 ### Complete Example
 
