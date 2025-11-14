@@ -102,7 +102,8 @@ class CollectionMigrator:
                           source_database_id: Optional[int] = None,
                           allow_nested: bool = False,
                           name_suffix: str = " (Migrated)",
-                          dry_run: bool = False) -> Dict:
+                          dry_run: bool = False,
+                          parent_collection_id: Optional[int] = None) -> Dict:
         """Migrate all questions from a source collection to a new target collection.
 
         Args:
@@ -113,6 +114,7 @@ class CollectionMigrator:
             allow_nested: Allow migration of nested questions
             name_suffix: Suffix to add to question names
             dry_run: If True, don't create anything
+            parent_collection_id: Parent collection ID for the new collection (None = root level)
 
         Returns:
             Migration report with results
@@ -170,7 +172,8 @@ class CollectionMigrator:
             else:
                 target_collection = self.api_client.create_collection(
                     name=target_collection_name,
-                    description=f"Migrated from '{analysis['collection_name']}' to database {target_database_id}"
+                    description=f"Migrated from '{analysis['collection_name']}' to database {target_database_id}",
+                    parent_id=parent_collection_id
                 )
                 report['target_collection_id'] = target_collection['id']
                 report['target_collection_existed'] = False

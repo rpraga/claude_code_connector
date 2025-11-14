@@ -792,6 +792,7 @@ def analyze_collection(collection_id, config, database_id):
 @click.argument('target_database_id', type=int)
 @click.option('--config', default='config.yaml', help='Path to configuration file')
 @click.option('--target-collection-name', help='Name for the target collection')
+@click.option('--parent-collection-id', type=int, help='Parent collection ID where the new collection will be created')
 @click.option('--source-database-id', type=int, help='Only migrate questions from this database')
 @click.option('--allow-nested', is_flag=True, help='Allow migration of nested questions')
 @click.option('--name-suffix', default=' (Migrated)', help='Suffix to add to question names')
@@ -799,7 +800,7 @@ def analyze_collection(collection_id, config, database_id):
 @click.option('--verify', is_flag=True, help='Verify migrated questions after creation')
 @click.option('--save-mapping', help='Save migration mapping to CSV file')
 def migrate_collection(source_collection_id, target_database_id, config, target_collection_name,
-                       source_database_id, allow_nested, name_suffix, dry_run, verify, save_mapping):
+                       parent_collection_id, source_database_id, allow_nested, name_suffix, dry_run, verify, save_mapping):
     """Migrate all questions from a collection to a new collection.
 
     SOURCE_COLLECTION_ID: The source collection ID
@@ -843,7 +844,8 @@ def migrate_collection(source_collection_id, target_database_id, config, target_
                 source_database_id=source_database_id,
                 allow_nested=allow_nested,
                 name_suffix=name_suffix,
-                dry_run=dry_run
+                dry_run=dry_run,
+                parent_collection_id=parent_collection_id
             )
 
             # Show results

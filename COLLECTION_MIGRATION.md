@@ -108,6 +108,7 @@ Migrate all questions from a collection to a new collection:
 
 **Options:**
 - `--target-collection-name NAME` - Custom name for target collection (default: source_name + "_migrated")
+- `--parent-collection-id ID` - Parent collection ID where the new collection will be created (default: root level)
 - `--source-database-id ID` - Only migrate questions from this database
 - `--allow-nested` - Allow migration of nested questions
 - `--name-suffix TEXT` - Suffix for question names (default: " (Migrated)")
@@ -123,6 +124,11 @@ Migrate all questions from a collection to a new collection:
 # With custom target collection name
 ./metabase-migrator migrate-collection 10 2 \
   --target-collection-name "Reports on Production DB"
+
+# Create new collection inside a parent collection (e.g., inside collection 42)
+./metabase-migrator migrate-collection 10 2 \
+  --target-collection-name "Migrated Reports" \
+  --parent-collection-id 42
 
 # Only migrate from database 1
 ./metabase-migrator migrate-collection 10 2 \
@@ -168,12 +174,14 @@ Migrate all questions from a collection to a new collection:
   --source-database-id 1 \
   --allow-nested \
   --target-collection-name "Old Reports (Production)" \
+  --parent-collection-id 5 \
   --dry-run
 
-# Step 4: Perform migration
+# Step 4: Perform migration (creates new collection inside collection 5)
 ./metabase-migrator migrate-collection 10 2 \
   --source-database-id 1 \
   --allow-nested \
+  --parent-collection-id 5 \
   --target-collection-name "Old Reports (Production)" \
   --save-mapping migration_report.csv
 

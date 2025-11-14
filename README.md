@@ -249,9 +249,19 @@ Migrate all questions from a collection at once:
 # Migrate entire collection
 ./metabase-migrator migrate-collection 10 2
 
+# With custom target collection name
+./metabase-migrator migrate-collection 10 2 \
+  --target-collection-name "Migrated Reports"
+
+# Place new collection inside a parent collection
+./metabase-migrator migrate-collection 10 2 \
+  --target-collection-name "Migrated Reports" \
+  --parent-collection-id 42
+
 # With database filtering and verification
 ./metabase-migrator migrate-collection 10 2 \
   --source-database-id 1 \
+  --parent-collection-id 42 \
   --verify \
   --save-mapping report.csv
 ```
