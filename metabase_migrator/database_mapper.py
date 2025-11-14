@@ -61,7 +61,7 @@ class DatabaseMapper:
         source_table_name = source_table['name']
         source_schema = source_table.get('schema', '')
 
-        # Check for custom mapping
+        # Check for table-specific custom mapping first (takes precedence)
         custom_key = f"{source_table_name}"
         if source_schema:
             custom_key = f"{source_schema}.{source_table_name}"
@@ -75,8 +75,15 @@ class DatabaseMapper:
             else:
                 target_schema = source_schema
         else:
-            target_table_name = source_table_name
-            target_schema = source_schema
+            # Check for schema-level mapping
+            schema_mappings = self.custom_mappings.get('schema_mappings', {})
+            if source_schema and source_schema in schema_mappings:
+                target_schema = schema_mappings[source_schema]
+                target_table_name = source_table_name
+            else:
+                # No mapping found, use original names
+                target_table_name = source_table_name
+                target_schema = source_schema
 
         # Search for table in target database
         target_metadata = self.api_client.get_database_metadata(target_database_id)

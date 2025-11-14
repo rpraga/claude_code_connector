@@ -7,12 +7,13 @@ A powerful command-line tool to migrate Metabase questions (widgets) from one da
 - **Query Builder Only**: Works exclusively with Query Builder queries (not native SQL)
 - **Nested Questions Support**: ✨ Automatically migrates questions based on other questions with `--allow-nested` flag
 - **Result Verification**: ✨ NEW! Verify migrated questions produce correct results with random sampling
+- **Schema-level Mappings**: ✨ NEW! Map entire schemas at once (e.g., `br_online` → `br_online_origin2`)
 - **Automatic Field Mapping**: Intelligently maps tables and fields between databases
 - **Dependency Resolution**: Detects and migrates question dependencies in the correct order
 - **Structure Preservation**: Maintains all query components (filters, aggregations, breakouts, joins)
 - **Visualization Settings**: Copies visualization settings and parameters
 - **Dry Run Mode**: Preview migrations before executing them
-- **Custom Mappings**: Support for custom table/field name mappings
+- **Custom Mappings**: Support for schema/table/field name mappings
 - **Detailed Reporting**: Shows field mappings, type mismatches, and potential issues
 - **Circular Reference Detection**: Prevents infinite loops in nested question chains
 - **Batch Operations**: Migrate and verify multiple questions at once
@@ -82,11 +83,22 @@ password: your-password
 
 # Optional: Custom mapping rules
 mapping_rules:
+  # Schema-level mappings (easiest - maps entire schema at once)
+  schema_mappings:
+    # All tables in source schema will map to target schema
+    br_online: br_online_origin2
+    old_schema: new_schema
+    public: dbo
+
+  # Table-level mappings (for specific table renames)
   table_mappings:
     # Map table names that differ between databases
     # source_table_name: target_table_name
     old_customers: new_customers
+    # Or with schema:
+    # old_schema.table_name: new_schema.new_table_name
 
+  # Field-level mappings (for specific field renames)
   field_mappings:
     # Map field names that differ between databases
     # source_table.source_field: target_field

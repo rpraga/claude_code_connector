@@ -16,13 +16,23 @@ password: your-password
 # Use these when table or field names differ between databases
 mapping_rules:
 
-  # Table name mappings
+  # Schema mappings (most convenient - maps entire schema)
+  # Format: source_schema: target_schema
+  # All tables in source_schema will be automatically mapped to target_schema
+  schema_mappings:
+    # Example: br_online: br_online_origin2
+    # Example: old_schema: new_schema
+    # Example: public: dbo
+
+  # Table name mappings (for specific table renames)
   # Format: source_table_name: target_table_name
+  # You can also use schema.table_name format for specific schema tables
   table_mappings:
     # Example: legacy_customers: customers
     # Example: old_orders: orders
+    # Example with schema: old_schema.customers: new_schema.client_data
 
-  # Field name mappings
+  # Field name mappings (for specific field renames)
   # Format: table_name.source_field: target_field
   field_mappings:
     # Example: customers.cust_id: customer_id
