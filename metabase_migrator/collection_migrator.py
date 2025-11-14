@@ -12,13 +12,15 @@ from .query_analyzer import QueryAnalyzer
 class CollectionMigrator:
     """Migrates all questions from a source collection to a target collection."""
 
-    def __init__(self, api_client: MetabaseAPIClient):
+    def __init__(self, api_client: MetabaseAPIClient, custom_mappings: Optional[Dict] = None):
         """Initialize collection migrator.
 
         Args:
             api_client: Metabase API client instance
+            custom_mappings: Optional custom mapping rules from config
         """
         self.api_client = api_client
+        self.custom_mappings = custom_mappings or {}
 
     def analyze_collection(self, collection_id: int, source_database_id: Optional[int] = None) -> Dict:
         """Analyze a collection and identify questions to migrate.
@@ -179,7 +181,7 @@ class CollectionMigrator:
                 report['target_collection_existed'] = False
 
         # Setup migration components
-        mapper = DatabaseMapper(self.api_client)
+        mapper = DatabaseMapper(self.api_client, self.custom_mappings)
         nested_handler = NestedQuestionHandler(self.api_client) if allow_nested else None
         migrator = QueryMigrator(mapper, nested_handler)
         creator = WidgetCreator(self.api_client)

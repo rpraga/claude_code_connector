@@ -749,9 +749,10 @@ def analyze_collection(collection_id, config, database_id):
         cfg = Config(config)
         metabase_url = cfg.get_metabase_url()
         credentials = cfg.get_credentials()
+        custom_mappings = cfg.get_mapping_rules()
 
         with MetabaseAPIClient(metabase_url, credentials) as client:
-            migrator = CollectionMigrator(client)
+            migrator = CollectionMigrator(client, custom_mappings)
 
             print_info(f"Analyzing collection {collection_id}...\n")
 
@@ -811,9 +812,10 @@ def migrate_collection(source_collection_id, target_database_id, config, target_
         cfg = Config(config)
         metabase_url = cfg.get_metabase_url()
         credentials = cfg.get_credentials()
+        custom_mappings = cfg.get_mapping_rules()
 
         with MetabaseAPIClient(metabase_url, credentials) as client:
-            migrator = CollectionMigrator(client)
+            migrator = CollectionMigrator(client, custom_mappings)
 
             # Analyze first
             print_info("Analyzing source collection...")
