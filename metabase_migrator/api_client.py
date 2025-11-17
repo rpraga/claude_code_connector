@@ -304,6 +304,120 @@ class MetabaseAPIClient:
 
         return matching
 
+    # Dashboard methods
+    def get_dashboard(self, dashboard_id: int) -> Dict:
+        """Get dashboard details including all cards.
+
+        Args:
+            dashboard_id: Dashboard ID
+
+        Returns:
+            Dashboard data with cards, parameters, etc.
+        """
+        response = self.session.get(f"{self.base_url}/api/dashboard/{dashboard_id}")
+        response.raise_for_status()
+        return response.json()
+
+    def list_dashboards(self) -> List[Dict]:
+        """List all dashboards.
+
+        Returns:
+            List of dashboard summaries
+        """
+        response = self.session.get(f"{self.base_url}/api/dashboard")
+        response.raise_for_status()
+        return response.json()
+
+    def create_dashboard(self, name: str, description: str = "",
+                        collection_id: Optional[int] = None,
+                        parameters: Optional[List[Dict]] = None) -> Dict:
+        """Create a new dashboard.
+
+        Args:
+            name: Dashboard name
+            description: Dashboard description
+            collection_id: Collection to place dashboard in
+            parameters: Dashboard parameters/filters
+
+        Returns:
+            Created dashboard data
+        """
+        dashboard_data = {
+            'name': name,
+            'description': description
+        }
+
+        if collection_id is not None:
+            dashboard_data['collection_id'] = collection_id
+
+        if parameters:
+            dashboard_data['parameters'] = parameters
+
+        response = self.session.post(
+            f"{self.base_url}/api/dashboard",
+            json=dashboard_data
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def add_card_to_dashboard(self, dashboard_id: int, card_id: int,
+                             row: int = 0, col: int = 0,
+                             size_x: int = 4, size_y: int = 4,
+                             parameter_mappings: Optional[List[Dict]] = None,
+                             visualization_settings: Optional[Dict] = None) -> Dict:
+        """Add a question card to a dashboard.
+
+        Args:
+            dashboard_id: Dashboard ID
+            card_id: Question/card ID to add
+            row: Row position
+            col: Column position
+            size_x: Width in grid units
+            size_y: Height in grid units
+            parameter_mappings: Parameter mappings for dashboard filters
+            visualization_settings: Visualization settings for this card
+
+        Returns:
+            Created dashcard data
+        """
+        dashcard_data = {
+            'cardId': card_id,
+            'row': row,
+            'col': col,
+            'sizeX': size_x,
+            'sizeY': size_y
+        }
+
+        if parameter_mappings:
+            dashcard_data['parameter_mappings'] = parameter_mappings
+
+        if visualization_settings:
+            dashcard_data['visualization_settings'] = visualization_settings
+
+        response = self.session.post(
+            f"{self.base_url}/api/dashboard/{dashboard_id}/cards",
+            json=dashcard_data
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def update_dashboard(self, dashboard_id: int, updates: Dict) -> Dict:
+        """Update dashboard properties.
+
+        Args:
+            dashboard_id: Dashboard ID
+            updates: Dictionary of fields to update
+
+        Returns:
+            Updated dashboard data
+        """
+        response = self.session.put(
+            f"{self.base_url}/api/dashboard/{dashboard_id}",
+            json=updates
+        )
+        response.raise_for_status()
+        return response.json()
+
     def close(self):
         """Close the session and cleanup."""
         if self.session_token:

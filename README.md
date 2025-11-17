@@ -4,10 +4,11 @@ A powerful command-line tool to migrate Metabase questions (widgets) from one da
 
 ## Features
 
+- **Dashboard Migration**: ✨ NEW! Migrate entire dashboards with all questions, filters, and layout preserved
 - **Query Builder Only**: Works exclusively with Query Builder queries (not native SQL)
 - **Nested Questions Support**: ✨ Automatically migrates questions based on other questions with `--allow-nested` flag
-- **Result Verification**: ✨ NEW! Verify migrated questions produce correct results with random sampling
-- **Schema-level Mappings**: ✨ NEW! Map entire schemas at once (e.g., `br_online` → `br_online_origin2`)
+- **Result Verification**: ✨ Verify migrated questions produce correct results with random sampling
+- **Schema-level Mappings**: ✨ Map entire schemas at once (e.g., `br_online` → `br_online_origin2`)
 - **Automatic Field Mapping**: Intelligently maps tables and fields between databases
 - **Dependency Resolution**: Detects and migrates question dependencies in the correct order
 - **Structure Preservation**: Maintains all query components (filters, aggregations, breakouts, joins)
@@ -267,6 +268,37 @@ Migrate all questions from a collection at once:
 ```
 
 See [COLLECTION_MIGRATION.md](COLLECTION_MIGRATION.md) for complete collection migration guide.
+
+### Migrate Entire Dashboards
+
+Migrate entire dashboards with all questions, filters, and layout:
+
+```bash
+# List all dashboards
+./metabase-migrator list-dashboards
+
+# Analyze a dashboard
+./metabase-migrator analyze-dashboard 5
+
+# Migrate entire dashboard
+./metabase-migrator migrate-dashboard 5 2
+
+# With options
+./metabase-migrator migrate-dashboard 5 2 \
+  --target-dashboard-name "Sales Dashboard (Production)" \
+  --collection-id 10 \
+  --source-database-id 1 \
+  --allow-nested \
+  --save-mapping dashboard_mapping.csv
+```
+
+**Features:**
+- ✅ Migrates all questions on the dashboard
+- ✅ Preserves dashboard layout (card positions and sizes)
+- ✅ Migrates dashboard filters/parameters
+- ✅ Maintains parameter mappings between dashboard filters and questions
+- ✅ Applies schema mappings from config
+- ✅ Handles nested questions with `--allow-nested`
 
 ### Complete Example
 

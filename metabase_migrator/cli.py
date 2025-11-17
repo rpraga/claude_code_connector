@@ -15,6 +15,7 @@ from .widget_creator import WidgetCreator
 from .nested_handler import NestedQuestionHandler
 from .verifier import QuestionVerifier
 from .collection_migrator import CollectionMigrator
+from .dashboard_migrator import DashboardMigrator
 
 
 # Initialize colorama for cross-platform colored output
@@ -934,6 +935,219 @@ def init_config():
         print_info("Copy this file to config.yaml and fill in your Metabase details.")
     except Exception as e:
         print_error(f"Failed to create example config: {e}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('dashboard_id', type=int)
+@click.option('--config', default='config.yaml', help='Path to configuration file')
+@click.option('--database-id', type=int, help='Filter questions by source database ID')
+def analyze_dashboard(dashboard_id, config, database_id):
+    """Analyze a dashboard and show which questions can be migrated.
+
+    DASHBOARD_ID: The ID of the dashboard to analyze
+    """
+    try:
+        cfg = Config(config)
+        metabase_url = cfg.get_metabase_url()
+        credentials = cfg.get_credentials()
+        custom_mappings = cfg.get_mapping_rules()
+
+        with MetabaseAPIClient(metabase_url, credentials) as client:
+            migrator = DashboardMigrator(client, custom_mappings)
+
+            print_info(f"Analyzing dashboard {dashboard_id}...\n")
+
+            analysis = migrator.analyze_dashboard(dashboard_id, database_id)
+
+            click.echo(f"{Fore.CYAN}Dashboard: {analysis['dashboard_name']}{Style.RESET_ALL}")
+            if analysis['description']:
+                click.echo(f"Description: {analysis['description']}")
+            click.echo(f"  Total Cards: {analysis['total_cards']}")
+            if analysis['parameters']:
+                click.echo(f"  Dashboard Filters: {len(analysis['parameters'])}")
+
+            stats = analysis['statistics']
+            click.echo(f"\n{Fore.CYAN}Statistics:{Style.RESET_ALL}")
+            click.echo(f"  Total Questions: {stats['total_questions']}")
+            click.echo(f"  Migratable: {Fore.GREEN}{stats['migratable']}{Style.RESET_ALL}")
+            click.echo(f"  Non-Migratable: {Fore.YELLOW}{stats['non_migratable']}{Style.RESET_ALL}")
+            click.echo(f"  Nested Questions: {stats['nested_questions']}")
+
+            if analysis['migratable']:
+                print_success(f"\n{stats['migratable']} question(s) can be migrated:")
+                for q in analysis['migratable']:
+                    nested_label = " [NESTED]" if q.get('is_nested') else ""
+                    click.echo(f"  • {q['name']} (ID: {q['id']}){nested_label}")
+
+            if analysis['non_migratable']:
+                print_warning(f"\n{stats['non_migratable']} question(s) cannot be migrated:")
+                for q in analysis['non_migratable']:
+                    reason = q.get('error') or q.get('skip_reason', 'Unknown reason')
+                    click.echo(f"  • {q['name']} (ID: {q['id']}) - {reason}")
+
+    except Exception as e:
+        print_error(f"Failed to analyze dashboard: {e}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('source_dashboard_id', type=int)
+@click.argument('target_database_id', type=int)
+@click.option('--config', default='config.yaml', help='Path to configuration file')
+@click.option('--target-dashboard-name', help='Name for the target dashboard')
+@click.option('--collection-id', type=int, help='Collection ID to place the dashboard in')
+@click.option('--source-database-id', type=int, help='Only migrate questions from this database')
+@click.option('--allow-nested', is_flag=True, help='Allow migration of nested questions')
+@click.option('--name-suffix', default=' (Migrated)', help='Suffix to add to question names')
+@click.option('--dry-run', is_flag=True, help='Preview migration without creating anything')
+@click.option('--save-mapping', help='Save migration mapping to CSV file')
+def migrate_dashboard(source_dashboard_id, target_database_id, config, target_dashboard_name,
+                     collection_id, source_database_id, allow_nested, name_suffix, dry_run, save_mapping):
+    """Migrate an entire dashboard to a new database.
+
+    SOURCE_DASHBOARD_ID: The source dashboard ID
+
+    TARGET_DATABASE_ID: The target database ID for migrated questions
+    """
+    try:
+        cfg = Config(config)
+        metabase_url = cfg.get_metabase_url()
+        credentials = cfg.get_credentials()
+        custom_mappings = cfg.get_mapping_rules()
+
+        with MetabaseAPIClient(metabase_url, credentials) as client:
+            migrator = DashboardMigrator(client, custom_mappings)
+
+            # Analyze first
+            print_info("Analyzing source dashboard...")
+            analysis = migrator.analyze_dashboard(source_dashboard_id, source_database_id)
+
+            click.echo(f"\n{Fore.CYAN}Source Dashboard:{Style.RESET_ALL} {analysis['dashboard_name']}")
+            click.echo(f"  Questions to migrate: {len(analysis['migratable'])}")
+            if analysis['parameters']:
+                click.echo(f"  Dashboard filters: {len(analysis['parameters'])}")
+
+            if not analysis['migratable']:
+                print_warning("No questions to migrate!")
+                sys.exit(0)
+
+            # Check for nested questions
+            nested_count = sum(1 for q in analysis['migratable'] if q.get('is_nested'))
+            if nested_count > 0 and not allow_nested:
+                print_warning(f"\n{nested_count} nested question(s) found. Use --allow-nested to migrate them.")
+
+            # Perform migration
+            if dry_run:
+                print_info("\n--- DRY RUN MODE ---")
+
+            print_info("\nMigrating dashboard...")
+
+            report = migrator.migrate_dashboard(
+                source_dashboard_id=source_dashboard_id,
+                target_database_id=target_database_id,
+                target_dashboard_name=target_dashboard_name,
+                source_database_id=source_database_id,
+                collection_id=collection_id,
+                allow_nested=allow_nested,
+                name_suffix=name_suffix,
+                dry_run=dry_run
+            )
+
+            # Show results
+            stats = report['statistics']
+
+            click.echo(f"\n{Fore.CYAN}Migration Results:{Style.RESET_ALL}")
+            if not dry_run and report['target_dashboard_id']:
+                click.echo(f"  Target Dashboard: {report['target_dashboard_name']} (ID: {report['target_dashboard_id']})")
+            click.echo(f"  Total: {stats['total']}")
+            click.echo(f"  Questions Migrated: {Fore.GREEN}{stats['questions_migrated']}{Style.RESET_ALL}")
+            click.echo(f"  Questions Failed: {Fore.RED}{stats['questions_failed']}{Style.RESET_ALL}")
+            click.echo(f"  Questions Skipped: {Fore.YELLOW}{stats['questions_skipped']}{Style.RESET_ALL}")
+            if not dry_run:
+                click.echo(f"  Cards Added to Dashboard: {stats['cards_added']}")
+
+            # Show successful migrations
+            if report['question_migrations']:
+                print_success(f"\n{len(report['question_migrations'])} question(s) migrated:")
+                for m in report['question_migrations']:
+                    if 'target_id' in m:
+                        warnings_str = f" (with {len(m['warnings'])} warnings)" if m.get('warnings') else ""
+                        click.echo(f"  • {m['source_name']} (ID: {m['source_id']} → {m['target_id']}){warnings_str}")
+
+            # Show failures
+            if report['failed_questions']:
+                print_error(f"\n{len(report['failed_questions'])} question(s) failed:")
+                for f in report['failed_questions']:
+                    errors = f.get('errors', [f.get('error', 'Unknown error')])
+                    if isinstance(errors, list):
+                        error_str = '; '.join(errors[:2])  # Show first 2 errors
+                    else:
+                        error_str = str(errors)
+                    click.echo(f"  • {f['name']} (ID: {f['question_id']})")
+                    click.echo(f"    - {error_str}")
+
+            # Show skipped
+            if report['skipped_questions']:
+                print_warning(f"\n{len(report['skipped_questions'])} question(s) skipped:")
+                for s in report['skipped_questions'][:10]:  # Show first 10
+                    click.echo(f"  • {s['name']} (ID: {s['question_id']}): {s['reason']}")
+                if len(report['skipped_questions']) > 10:
+                    click.echo(f"  ... and {len(report['skipped_questions']) - 10} more")
+
+            # Save mapping if requested
+            if save_mapping and report['question_migrations']:
+                csv_content = migrator.get_migration_mapping_csv(report)
+                with open(save_mapping, 'w') as f:
+                    f.write(csv_content)
+                print_success(f"\nMapping saved to: {save_mapping}")
+
+            if dry_run:
+                print_success("\nDry run completed. No questions or dashboard were created.")
+            elif stats['questions_migrated'] > 0:
+                print_success(f"\n✓ Dashboard migration completed!")
+                if not dry_run and report['target_dashboard_id']:
+                    click.echo(f"View dashboard: {metabase_url}/dashboard/{report['target_dashboard_id']}")
+
+    except Exception as e:
+        print_error(f"Dashboard migration failed: {e}")
+        import traceback
+        if '--debug' in sys.argv:
+            traceback.print_exc()
+        sys.exit(1)
+
+
+@cli.command()
+def list_dashboards():
+    """List all dashboards."""
+    try:
+        cfg = Config()
+        metabase_url = cfg.get_metabase_url()
+        credentials = cfg.get_credentials()
+
+        with MetabaseAPIClient(metabase_url, credentials) as client:
+            dashboards = client.list_dashboards()
+
+            if not dashboards:
+                print_warning("No dashboards found.")
+                return
+
+            print_success(f"Found {len(dashboards)} dashboard(s):\n")
+
+            # Prepare table data
+            table_data = []
+            for dashboard in dashboards:
+                table_data.append([
+                    dashboard['id'],
+                    dashboard['name'],
+                    dashboard.get('description', '')[:50]  # Truncate long descriptions
+                ])
+
+            headers = ['ID', 'Name', 'Description']
+            click.echo(tabulate(table_data, headers=headers, tablefmt='simple'))
+
+    except Exception as e:
+        print_error(f"Failed to list dashboards: {e}")
         sys.exit(1)
 
 
