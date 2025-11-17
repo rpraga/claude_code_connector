@@ -132,6 +132,14 @@ class QueryAnalyzer:
 
         source_table = query_dict.get('source-table')
 
+        # If no direct source-table, check for source-query (subquery pattern)
+        if source_table is None and 'source-query' in query_dict:
+            source_query = query_dict['source-query']
+            if isinstance(source_query, dict):
+                source_table = source_query.get('source-table')
+                if source_table is None:
+                    raise ValueError("Could not find source-table in source-query")
+
         if source_table is None:
             raise ValueError("Could not find source-table in query")
 
@@ -182,6 +190,14 @@ class QueryAnalyzer:
         for key in ['fields', 'breakout', 'filter', 'aggregation', 'order-by']:
             if key in query_dict:
                 extract_from_clause(query_dict[key])
+
+        # Also extract from source-query if present (subquery pattern)
+        if 'source-query' in query_dict:
+            source_query = query_dict['source-query']
+            if isinstance(source_query, dict):
+                for key in ['fields', 'breakout', 'filter', 'aggregation', 'order-by']:
+                    if key in source_query:
+                        extract_from_clause(source_query[key])
 
         return field_ids
 

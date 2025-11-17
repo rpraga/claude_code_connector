@@ -83,11 +83,22 @@ class QueryMigrator:
         if 'dataset_query' in migrated:
             migrated['dataset_query']['database'] = target_database_id
 
-        # Update source table in query
+        # Get query dictionary
         query_dict = migrated.get('dataset_query', {}).get('query', migrated.get('query', {}))
-        query_dict['source-table'] = target_table_id
 
-        # Migrate all field references
+        # Check if this is a source-query pattern (subquery)
+        if 'source-query' in query_dict:
+            # Migrate the source-query's source-table
+            source_query = query_dict['source-query']
+            if isinstance(source_query, dict) and 'source-table' in source_query:
+                source_query['source-table'] = target_table_id
+                # Migrate fields in the source-query
+                self._migrate_query_components(source_query, source_table_id, target_table_id)
+        else:
+            # Regular query - update source-table directly
+            query_dict['source-table'] = target_table_id
+
+        # Migrate all field references in the outer query
         self._migrate_query_components(query_dict, source_table_id, target_table_id)
 
         return migrated, self.errors, self.warnings
@@ -138,6 +149,8 @@ class QueryMigrator:
             source_table_id: Source table ID
             target_table_id: Target table ID
         """
+        # Note: Don't process 'source-query' here - it's handled separately in _migrate_table_query
+
         # Migrate fields
         if 'fields' in query_dict:
             query_dict['fields'] = self._migrate_field_list(
