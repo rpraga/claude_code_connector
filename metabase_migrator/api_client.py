@@ -434,10 +434,10 @@ class MetabaseAPIClient:
         cards_payload.append(new_card)
 
         # Use PUT with cards array (Metabase v0.47+ unified endpoint)
-        # Send array directly, not wrapped in object
+        # Must be wrapped in 'cards' key per API specification
         response = self.session.put(
             f"{self.base_url}/api/dashboard/{dashboard_id}/cards",
-            json=cards_payload
+            json={'cards': cards_payload}
         )
         response.raise_for_status()
         result = response.json()

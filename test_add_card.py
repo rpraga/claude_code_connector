@@ -45,13 +45,13 @@ def main():
 
         print(f"\n=== Sending PUT request ===")
         print(f"URL: {client.base_url}/api/dashboard/{dashboard_id}/cards")
-        print(f"Payload (array with {len(cards_payload)} cards):")
+        print(f"Payload (array with {len(cards_payload)} cards, wrapped in 'cards' key):")
         print(json.dumps(cards_payload[-1], indent=2))  # Show just the new card
 
-        # Make the request
+        # Make the request - wrap in 'cards' key per API specification
         response = client.session.put(
             f"{client.base_url}/api/dashboard/{dashboard_id}/cards",
-            json=cards_payload
+            json={'cards': cards_payload}
         )
 
         print(f"\n=== Response ===")
