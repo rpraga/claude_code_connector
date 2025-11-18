@@ -331,7 +331,8 @@ class MetabaseAPIClient:
     def create_dashboard(self, name: str, description: str = "",
                         collection_id: Optional[int] = None,
                         parameters: Optional[List[Dict]] = None,
-                        tabs: Optional[List[Dict]] = None) -> Dict:
+                        tabs: Optional[List[Dict]] = None,
+                        dashcards: Optional[List[Dict]] = None) -> Dict:
         """Create a new dashboard.
 
         Args:
@@ -340,6 +341,7 @@ class MetabaseAPIClient:
             collection_id: Collection to place dashboard in
             parameters: Dashboard parameters/filters
             tabs: Dashboard tabs (list of {name, position} dicts)
+            dashcards: Dashboard cards to add during creation
 
         Returns:
             Created dashboard data
@@ -357,6 +359,9 @@ class MetabaseAPIClient:
 
         if tabs:
             dashboard_data['tabs'] = tabs
+
+        if dashcards:
+            dashboard_data['dashcards'] = dashcards
 
         response = self.session.post(
             f"{self.base_url}/api/dashboard",
@@ -449,6 +454,22 @@ class MetabaseAPIClient:
         response.raise_for_status()
         return response.json()
 
+    def update_dashcard_tab(self, dashcard_id: int, tab_id: int) -> Dict:
+        """Assign a dashcard to a specific tab.
+
+        Args:
+            dashcard_id: Dashcard ID
+            tab_id: Dashboard tab ID
+
+        Returns:
+            Updated dashcard data
+        """
+        response = self.session.put(
+            f"{self.base_url}/api/dashcard/{dashcard_id}",
+            json={'dashboard_tab_id': tab_id}
+        )
+        response.raise_for_status()
+        return response.json()
 
     def close(self):
         """Close the session and cleanup."""
