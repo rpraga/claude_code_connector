@@ -364,7 +364,8 @@ class MetabaseAPIClient:
                              row: int = 0, col: int = 0,
                              size_x: int = 4, size_y: int = 4,
                              parameter_mappings: Optional[List[Dict]] = None,
-                             visualization_settings: Optional[Dict] = None) -> Dict:
+                             visualization_settings: Optional[Dict] = None,
+                             dashboard_tab_id: Optional[int] = None) -> Dict:
         """Add a question card to a dashboard.
 
         Args:
@@ -376,16 +377,17 @@ class MetabaseAPIClient:
             size_y: Height in grid units
             parameter_mappings: Parameter mappings for dashboard filters
             visualization_settings: Visualization settings for this card
+            dashboard_tab_id: Optional tab ID to assign card to
 
         Returns:
             Created dashcard data
         """
         dashcard_data = {
-            'cardId': card_id,
+            'card_id': card_id,
             'row': row,
             'col': col,
-            'sizeX': size_x,
-            'sizeY': size_y
+            'size_x': size_x,
+            'size_y': size_y
         }
 
         if parameter_mappings:
@@ -394,12 +396,28 @@ class MetabaseAPIClient:
         if visualization_settings:
             dashcard_data['visualization_settings'] = visualization_settings
 
-        response = self.session.post(
-            f"{self.base_url}/api/dashboard/{dashboard_id}/cards",
-            json=dashcard_data
-        )
-        response.raise_for_status()
-        return response.json()
+        if dashboard_tab_id is not None:
+            dashcard_data['dashboard_tab_id'] = dashboard_tab_id
+
+        # Try the standard endpoint first
+        try:
+            response = self.session.post(
+                f"{self.base_url}/api/dashboard/{dashboard_id}/cards",
+                json=dashcard_data
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # Try alternative endpoint (used in some Metabase versions)
+                response = self.session.post(
+                    f"{self.base_url}/api/dashboard/{dashboard_id}/dashcard",
+                    json=dashcard_data
+                )
+                response.raise_for_status()
+                return response.json()
+            else:
+                raise
 
     def update_dashboard(self, dashboard_id: int, updates: Dict) -> Dict:
         """Update dashboard properties.
@@ -418,27 +436,43 @@ class MetabaseAPIClient:
         response.raise_for_status()
         return response.json()
 
-    def create_dashboard_tab(self, dashboard_id: int, name: str) -> Dict:
+    def create_dashboard_tab(self, dashboard_id: int, name: str, position: int = 0) -> Dict:
         """Create a new tab on a dashboard.
 
         Args:
             dashboard_id: Dashboard ID
             name: Tab name
+            position: Tab position/order
 
         Returns:
             Created tab data with ID
         """
-        tab_data = {
+        # Get current dashboard to preserve existing data
+        dashboard = self.get_dashboard(dashboard_id)
+
+        # Build new tab object
+        new_tab = {
             'name': name,
-            'dashboard_id': dashboard_id
+            'position': position
         }
 
-        response = self.session.post(
-            f"{self.base_url}/api/dashboard/{dashboard_id}/tabs",
-            json=tab_data
+        # Get existing tabs or initialize empty list
+        tabs = dashboard.get('tabs', [])
+        tabs.append(new_tab)
+
+        # Update dashboard with new tabs
+        response = self.session.put(
+            f"{self.base_url}/api/dashboard/{dashboard_id}",
+            json={'tabs': tabs}
         )
         response.raise_for_status()
-        return response.json()
+        result = response.json()
+
+        # Return the newly created tab
+        created_tabs = result.get('tabs', [])
+        if created_tabs:
+            return created_tabs[-1]  # Return last tab
+        return new_tab
 
     def update_dashcard_tab(self, dashcard_id: int, tab_id: int) -> Dict:
         """Assign a dashcard to a specific tab.
@@ -451,7 +485,7 @@ class MetabaseAPIClient:
             Updated dashcard data
         """
         response = self.session.put(
-            f"{self.base_url}/api/dashboard/dashcard/{dashcard_id}",
+            f"{self.base_url}/api/dashcard/{dashcard_id}",
             json={'dashboard_tab_id': tab_id}
         )
         response.raise_for_status()
