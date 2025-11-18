@@ -271,32 +271,35 @@ class DashboardMigrator:
 
         # Create dashboard (if not dry run and we have questions)
         if not dry_run and report['question_migrations']:
-            # Create dashboard with parameters from original
+            # Prepare tabs for dashboard creation
+            tabs = None
+            tab_mapping = {}  # Maps source tab ID to new tab ID
+
+            if analysis.get('tabs'):
+                tabs = []
+                for idx, source_tab in enumerate(analysis['tabs']):
+                    tabs.append({
+                        'name': source_tab.get('name', 'Tab'),
+                        'position': idx
+                    })
+
+            # Create dashboard with parameters and tabs
             dashboard = self.api_client.create_dashboard(
                 name=target_dashboard_name,
                 description=analysis.get('description', ''),
                 collection_id=collection_id,
-                parameters=analysis.get('parameters', [])
+                parameters=analysis.get('parameters', []),
+                tabs=tabs
             )
             report['target_dashboard_id'] = dashboard['id']
 
-            # Create tabs if original dashboard had tabs
-            tab_mapping = {}  # Maps source tab ID to new tab ID
-            if analysis.get('tabs'):
-                for idx, source_tab in enumerate(analysis['tabs']):
-                    try:
-                        new_tab = self.api_client.create_dashboard_tab(
-                            dashboard_id=dashboard['id'],
-                            name=source_tab.get('name', 'Tab'),
-                            position=idx
-                        )
-                        tab_mapping[source_tab['id']] = new_tab['id']
-                    except Exception as e:
-                        # If tab creation fails, continue without tabs
-                        print(f"Warning: Failed to create tab '{source_tab.get('name')}': {e}")
-                        # Clear tab mapping to prevent partial tab assignments
-                        tab_mapping = {}
-                        break
+            # Build tab mapping from created dashboard
+            if tabs and dashboard.get('tabs'):
+                created_tabs = dashboard['tabs']
+                source_tabs = analysis['tabs']
+                for idx, source_tab in enumerate(source_tabs):
+                    if idx < len(created_tabs):
+                        tab_mapping[source_tab['id']] = created_tabs[idx]['id']
 
             # Add cards to dashboard with original layout
             for card_info in analysis['cards_info']:
