@@ -391,15 +391,32 @@ class MetabaseAPIClient:
         dashboard = self.get_dashboard(dashboard_id)
         existing_cards = dashboard.get('dashcards', dashboard.get('ordered_cards', []))
 
+        # Extract only essential fields from existing cards (v0.47+ requires minimal payload)
+        cards_payload = []
+        if existing_cards:
+            for card in existing_cards:
+                minimal_card = {
+                    'id': card['id'],
+                    'card_id': card.get('card_id'),
+                    'row': card.get('row', 0),
+                    'col': card.get('col', 0),
+                    'size_x': card.get('size_x', 4),
+                    'size_y': card.get('size_y', 4)
+                }
+                if card.get('parameter_mappings'):
+                    minimal_card['parameter_mappings'] = card['parameter_mappings']
+                if card.get('visualization_settings'):
+                    minimal_card['visualization_settings'] = card['visualization_settings']
+                if card.get('dashboard_tab_id'):
+                    minimal_card['dashboard_tab_id'] = card['dashboard_tab_id']
+                cards_payload.append(minimal_card)
+
         # Build new dashcard with id=-1 for creation (Metabase v0.47+ requirement)
         new_card = {
             'id': -1,  # Negative ID indicates new card
-            'cardId': card_id,
             'card_id': card_id,
             'row': row,
             'col': col,
-            'sizeX': size_x,
-            'sizeY': size_y,
             'size_x': size_x,
             'size_y': size_y
         }
@@ -413,14 +430,14 @@ class MetabaseAPIClient:
         if dashboard_tab_id is not None:
             new_card['dashboard_tab_id'] = dashboard_tab_id
 
-        # Combine existing and new cards
-        all_cards = list(existing_cards) if existing_cards else []
-        all_cards.append(new_card)
+        # Add new card to payload
+        cards_payload.append(new_card)
 
         # Use PUT with cards array (Metabase v0.47+ unified endpoint)
+        # Send array directly, not wrapped in object
         response = self.session.put(
             f"{self.base_url}/api/dashboard/{dashboard_id}/cards",
-            json={'cards': all_cards}
+            json=cards_payload
         )
         response.raise_for_status()
         result = response.json()
