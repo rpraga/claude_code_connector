@@ -283,50 +283,13 @@ class DashboardMigrator:
                         'position': idx
                     })
 
-            # Build all dashcards before creating dashboard
-            dashcards = []
-            for card_info in analysis['cards_info']:
-                source_question_id = card_info['id']
-
-                # Only add if question was migrated successfully
-                if source_question_id in question_mapping:
-                    target_question_id = question_mapping[source_question_id]
-
-                    # Update parameter mappings with new card ID
-                    parameter_mappings = self._update_parameter_mappings(
-                        card_info.get('parameter_mappings', []),
-                        source_question_id,
-                        target_question_id
-                    )
-
-                    # Determine tab assignment (use source tab ID for now, will map after dashboard created)
-                    source_tab_id = card_info.get('dashboard_tab_id')
-
-                    # Build dashcard object
-                    dashcard = {
-                        'card_id': target_question_id,
-                        'row': card_info['layout']['row'],
-                        'col': card_info['layout']['col'],
-                        'size_x': card_info['layout']['sizeX'],
-                        'size_y': card_info['layout']['sizeY'],
-                        'parameter_mappings': parameter_mappings,
-                        'visualization_settings': card_info.get('visualization_settings', {})
-                    }
-
-                    # Store source tab ID for later mapping
-                    if source_tab_id:
-                        dashcard['_source_tab_id'] = source_tab_id
-
-                    dashcards.append(dashcard)
-
-            # Create dashboard with parameters, tabs, and all cards at once
+            # Create dashboard with parameters and tabs only
             dashboard = self.api_client.create_dashboard(
                 name=target_dashboard_name,
                 description=analysis.get('description', ''),
                 collection_id=collection_id,
                 parameters=analysis.get('parameters', []),
-                tabs=tabs,
-                dashcards=dashcards if dashcards else None
+                tabs=tabs
             )
             report['target_dashboard_id'] = dashboard['id']
 
@@ -338,47 +301,53 @@ class DashboardMigrator:
                     if idx < len(created_tabs):
                         tab_mapping[source_tab['id']] = created_tabs[idx]['id']
 
-            # Update dashcards with correct tab IDs if tabs were created
-            if tab_mapping and dashboard.get('dashcards'):
-                cards_to_update = []
-                for dashcard in dashboard['dashcards']:
-                    # Check if this card needs tab assignment
-                    for original_card in dashcards:
-                        if (original_card.get('card_id') == dashcard.get('card_id') and
-                            '_source_tab_id' in original_card):
-                            source_tab_id = original_card['_source_tab_id']
-                            if source_tab_id in tab_mapping:
-                                cards_to_update.append({
-                                    'dashcard_id': dashcard['id'],
-                                    'tab_id': tab_mapping[source_tab_id]
-                                })
-                            break
-
-                # Update tab assignments
-                for update in cards_to_update:
-                    try:
-                        self.api_client.update_dashcard_tab(
-                            dashcard_id=update['dashcard_id'],
-                            tab_id=update['tab_id']
-                        )
-                    except:
-                        pass  # Tab assignment is optional
-
-            # Record cards that were added
+            # Add cards to dashboard using PUT /api/dashboard/:id/cards (v0.47+)
             for card_info in analysis['cards_info']:
                 source_question_id = card_info['id']
+
+                # Only add if question was migrated successfully
                 if source_question_id in question_mapping:
                     target_question_id = question_mapping[source_question_id]
-                    source_tab_id = card_info.get('dashboard_tab_id')
-                    target_tab_id = tab_mapping.get(source_tab_id) if source_tab_id else None
 
-                    report['cards_added'].append({
-                        'source_question_id': source_question_id,
-                        'target_question_id': target_question_id,
-                        'dashcard_id': None,  # Will be assigned by server
-                        'position': card_info['layout'],
-                        'tab_id': target_tab_id
-                    })
+                    try:
+                        # Update parameter mappings with new card ID
+                        parameter_mappings = self._update_parameter_mappings(
+                            card_info.get('parameter_mappings', []),
+                            source_question_id,
+                            target_question_id
+                        )
+
+                        # Determine tab assignment
+                        source_tab_id = card_info.get('dashboard_tab_id')
+                        target_tab_id = tab_mapping.get(source_tab_id) if source_tab_id else None
+
+                        # Add card to dashboard
+                        dashcard = self.api_client.add_card_to_dashboard(
+                            dashboard_id=dashboard['id'],
+                            card_id=target_question_id,
+                            row=card_info['layout']['row'],
+                            col=card_info['layout']['col'],
+                            size_x=card_info['layout']['sizeX'],
+                            size_y=card_info['layout']['sizeY'],
+                            parameter_mappings=parameter_mappings,
+                            visualization_settings=card_info.get('visualization_settings'),
+                            dashboard_tab_id=target_tab_id
+                        )
+
+                        report['cards_added'].append({
+                            'source_question_id': source_question_id,
+                            'target_question_id': target_question_id,
+                            'dashcard_id': dashcard.get('id'),
+                            'position': card_info['layout'],
+                            'tab_id': target_tab_id
+                        })
+
+                    except Exception as e:
+                        report['failed_questions'].append({
+                            'question_id': source_question_id,
+                            'name': card_info['name'],
+                            'error': f"Failed to add to dashboard: {e}"
+                        })
 
         # Verify dashboard was populated (if not dry run)
         if not dry_run and report.get('target_dashboard_id'):

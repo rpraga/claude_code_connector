@@ -331,8 +331,7 @@ class MetabaseAPIClient:
     def create_dashboard(self, name: str, description: str = "",
                         collection_id: Optional[int] = None,
                         parameters: Optional[List[Dict]] = None,
-                        tabs: Optional[List[Dict]] = None,
-                        dashcards: Optional[List[Dict]] = None) -> Dict:
+                        tabs: Optional[List[Dict]] = None) -> Dict:
         """Create a new dashboard.
 
         Args:
@@ -341,7 +340,6 @@ class MetabaseAPIClient:
             collection_id: Collection to place dashboard in
             parameters: Dashboard parameters/filters
             tabs: Dashboard tabs (list of {name, position} dicts)
-            dashcards: Dashboard cards to add during creation
 
         Returns:
             Created dashboard data
@@ -360,9 +358,6 @@ class MetabaseAPIClient:
         if tabs:
             dashboard_data['tabs'] = tabs
 
-        if dashcards:
-            dashboard_data['dashcards'] = dashcards
-
         response = self.session.post(
             f"{self.base_url}/api/dashboard",
             json=dashboard_data
@@ -376,7 +371,7 @@ class MetabaseAPIClient:
                              parameter_mappings: Optional[List[Dict]] = None,
                              visualization_settings: Optional[Dict] = None,
                              dashboard_tab_id: Optional[int] = None) -> Dict:
-        """Add a question card to a dashboard.
+        """Add a question card to a dashboard using PUT /api/dashboard/:id/cards (Metabase v0.47+).
 
         Args:
             dashboard_id: Dashboard ID
@@ -392,50 +387,49 @@ class MetabaseAPIClient:
         Returns:
             Created dashcard data
         """
-        # Build dashcard payload - trying different structures for compatibility
-        dashcard_data = {
-            'cardId': card_id,  # Try camelCase first
-            'card_id': card_id,  # Also include snake_case
+        # Get current dashboard to preserve existing cards
+        dashboard = self.get_dashboard(dashboard_id)
+        existing_cards = dashboard.get('dashcards', dashboard.get('ordered_cards', []))
+
+        # Build new dashcard with id=-1 for creation (Metabase v0.47+ requirement)
+        new_card = {
+            'id': -1,  # Negative ID indicates new card
+            'cardId': card_id,
+            'card_id': card_id,
             'row': row,
             'col': col,
             'sizeX': size_x,
-            'size_x': size_x,
             'sizeY': size_y,
+            'size_x': size_x,
             'size_y': size_y
         }
 
         if parameter_mappings:
-            dashcard_data['parameter_mappings'] = parameter_mappings
+            new_card['parameter_mappings'] = parameter_mappings
 
         if visualization_settings:
-            dashcard_data['visualization_settings'] = visualization_settings
+            new_card['visualization_settings'] = visualization_settings
 
         if dashboard_tab_id is not None:
-            dashcard_data['dashboard_tab_id'] = dashboard_tab_id
+            new_card['dashboard_tab_id'] = dashboard_tab_id
 
-        # Try multiple endpoints for compatibility across Metabase versions
-        endpoints_to_try = [
-            f"/api/dashboard/{dashboard_id}/cards",  # Plural - older versions
-            f"/api/dashboard/{dashboard_id}/card",   # Singular - some versions use this
-        ]
+        # Combine existing and new cards
+        all_cards = list(existing_cards) if existing_cards else []
+        all_cards.append(new_card)
 
-        last_error = None
-        for endpoint in endpoints_to_try:
-            try:
-                response = self.session.post(
-                    f"{self.base_url}{endpoint}",
-                    json=dashcard_data
-                )
-                response.raise_for_status()
-                return response.json()
-            except requests.exceptions.HTTPError as e:
-                last_error = e
-                continue
+        # Use PUT with cards array (Metabase v0.47+ unified endpoint)
+        response = self.session.put(
+            f"{self.base_url}/api/dashboard/{dashboard_id}/cards",
+            json={'cards': all_cards}
+        )
+        response.raise_for_status()
+        result = response.json()
 
-        # If everything fails, raise the last error
-        if last_error:
-            raise last_error
-        raise Exception(f"Failed to add card {card_id} to dashboard {dashboard_id}")
+        # Return the newly created card
+        updated_cards = result.get('dashcards', result.get('ordered_cards', []))
+        if updated_cards:
+            return updated_cards[-1]
+        return new_card
 
     def update_dashboard(self, dashboard_id: int, updates: Dict) -> Dict:
         """Update dashboard properties.
