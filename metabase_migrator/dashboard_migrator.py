@@ -276,15 +276,23 @@ class DashboardMigrator:
             tab_mapping = {}  # Maps source tab ID to new tab ID
             parameter_mapping = {}  # Maps source parameter ID to new parameter ID
 
+            print(f"\n=== Dashboard Creation Debug ===")
+            print(f"Analysis has tabs: {bool(analysis.get('tabs'))}")
             if analysis.get('tabs'):
+                print(f"Source tabs in analysis: {len(analysis['tabs'])}")
+                for tab in analysis['tabs']:
+                    print(f"  - {tab.get('name')} (ID: {tab.get('id')})")
+
                 tabs = []
                 for idx, source_tab in enumerate(analysis['tabs']):
                     tabs.append({
                         'name': source_tab.get('name', 'Tab'),
                         'position': idx
                     })
+                print(f"Tabs to create: {tabs}")
 
             # Create dashboard with parameters and tabs only
+            print(f"\nCalling create_dashboard with tabs={tabs}")
             dashboard = self.api_client.create_dashboard(
                 name=target_dashboard_name,
                 description=analysis.get('description', ''),
@@ -293,6 +301,11 @@ class DashboardMigrator:
                 tabs=tabs
             )
             report['target_dashboard_id'] = dashboard['id']
+
+            print(f"Dashboard created with ID: {dashboard['id']}")
+            print(f"Dashboard response has 'tabs' key: {'tabs' in dashboard}")
+            if 'tabs' in dashboard:
+                print(f"Dashboard response tabs: {dashboard.get('tabs')}")
 
             # Build tab mapping from created dashboard
             if tabs and dashboard.get('tabs'):
