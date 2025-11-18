@@ -39,7 +39,7 @@ class DashboardMigrator:
             'dashboard_id': dashboard_id,
             'description': dashboard.get('description', ''),
             'parameters': dashboard.get('parameters', []),
-            'total_cards': len(dashboard.get('ordered_cards', [])),
+            'total_cards': 0,
             'questions': [],
             'migratable': [],
             'non_migratable': [],
@@ -47,8 +47,24 @@ class DashboardMigrator:
             'cards_info': []  # Will store layout info for each card
         }
 
+        # Get dashcards - handle different Metabase versions
+        # Newer versions with tabs might have cards in different locations
+        dashcards = dashboard.get('ordered_cards', [])
+        if not dashcards:
+            # Try alternative locations (dashcards, tabs, etc.)
+            dashcards = dashboard.get('dashcards', [])
+        if not dashcards:
+            # Some APIs return tabs with cards inside
+            tabs = dashboard.get('tabs', [])
+            if tabs:
+                # Collect cards from all tabs
+                for tab in tabs:
+                    dashcards.extend(tab.get('cards', []))
+
+        report['total_cards'] = len(dashcards)
+
         # Analyze each card on the dashboard
-        for dashcard in dashboard.get('ordered_cards', []):
+        for dashcard in dashcards:
             card = dashcard.get('card')
             if not card:
                 continue
@@ -62,11 +78,12 @@ class DashboardMigrator:
                 'layout': {
                     'row': dashcard.get('row'),
                     'col': dashcard.get('col'),
-                    'sizeX': dashcard.get('sizeX'),
-                    'sizeY': dashcard.get('sizeY')
+                    'sizeX': dashcard.get('size_x') or dashcard.get('sizeX'),  # Handle both formats
+                    'sizeY': dashcard.get('size_y') or dashcard.get('sizeY')
                 },
                 'parameter_mappings': dashcard.get('parameter_mappings', []),
-                'visualization_settings': dashcard.get('visualization_settings', {})
+                'visualization_settings': dashcard.get('visualization_settings', {}),
+                'dashboard_tab_id': dashcard.get('dashboard_tab_id')  # Track which tab it's on
             }
 
             report['cards_info'].append(card_info)
