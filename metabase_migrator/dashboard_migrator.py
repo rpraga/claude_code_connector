@@ -39,6 +39,7 @@ class DashboardMigrator:
             'dashboard_id': dashboard_id,
             'description': dashboard.get('description', ''),
             'parameters': dashboard.get('parameters', []),
+            'tabs': dashboard.get('tabs', []),  # Store tab information
             'total_cards': 0,
             'questions': [],
             'migratable': [],
@@ -112,7 +113,9 @@ class DashboardMigrator:
             'migratable': len(report['migratable']),
             'non_migratable': len(report['non_migratable']),
             'nested_questions': sum(1 for q in report['migratable'] if q.get('is_nested')),
-            'has_parameters': len(report['parameters']) > 0
+            'has_parameters': len(report['parameters']) > 0,
+            'has_tabs': len(report['tabs']) > 0,
+            'tab_count': len(report['tabs'])
         }
 
         return report
@@ -277,6 +280,21 @@ class DashboardMigrator:
             )
             report['target_dashboard_id'] = dashboard['id']
 
+            # Create tabs if original dashboard had tabs
+            tab_mapping = {}  # Maps source tab ID to new tab ID
+            if analysis.get('tabs'):
+                for source_tab in analysis['tabs']:
+                    try:
+                        new_tab = self.api_client.create_dashboard_tab(
+                            dashboard_id=dashboard['id'],
+                            name=source_tab.get('name', 'Tab')
+                        )
+                        tab_mapping[source_tab['id']] = new_tab['id']
+                    except Exception as e:
+                        # If tab creation fails, continue without tabs
+                        print(f"Warning: Failed to create tab '{source_tab.get('name')}': {e}")
+                        break
+
             # Add cards to dashboard with original layout
             for card_info in analysis['cards_info']:
                 source_question_id = card_info['id']
@@ -305,11 +323,24 @@ class DashboardMigrator:
                             visualization_settings=card_info.get('visualization_settings')
                         )
 
+                        # Assign card to the correct tab if tabs were created
+                        source_tab_id = card_info.get('dashboard_tab_id')
+                        if source_tab_id and source_tab_id in tab_mapping:
+                            try:
+                                self.api_client.update_dashcard_tab(
+                                    dashcard_id=dashcard['id'],
+                                    tab_id=tab_mapping[source_tab_id]
+                                )
+                            except Exception as e:
+                                # Tab assignment failed, but card was added
+                                print(f"Warning: Failed to assign card to tab: {e}")
+
                         report['cards_added'].append({
                             'source_question_id': source_question_id,
                             'target_question_id': target_question_id,
                             'dashcard_id': dashcard.get('id'),
-                            'position': card_info['layout']
+                            'position': card_info['layout'],
+                            'tab_id': tab_mapping.get(source_tab_id) if source_tab_id else None
                         })
 
                     except Exception as e:

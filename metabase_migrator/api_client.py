@@ -418,6 +418,45 @@ class MetabaseAPIClient:
         response.raise_for_status()
         return response.json()
 
+    def create_dashboard_tab(self, dashboard_id: int, name: str) -> Dict:
+        """Create a new tab on a dashboard.
+
+        Args:
+            dashboard_id: Dashboard ID
+            name: Tab name
+
+        Returns:
+            Created tab data with ID
+        """
+        tab_data = {
+            'name': name,
+            'dashboard_id': dashboard_id
+        }
+
+        response = self.session.post(
+            f"{self.base_url}/api/dashboard/{dashboard_id}/tabs",
+            json=tab_data
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def update_dashcard_tab(self, dashcard_id: int, tab_id: int) -> Dict:
+        """Assign a dashcard to a specific tab.
+
+        Args:
+            dashcard_id: Dashcard ID
+            tab_id: Dashboard tab ID
+
+        Returns:
+            Updated dashcard data
+        """
+        response = self.session.put(
+            f"{self.base_url}/api/dashboard/dashcard/{dashcard_id}",
+            json={'dashboard_tab_id': tab_id}
+        )
+        response.raise_for_status()
+        return response.json()
+
     def close(self):
         """Close the session and cleanup."""
         if self.session_token:

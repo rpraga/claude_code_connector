@@ -966,6 +966,8 @@ def analyze_dashboard(dashboard_id, config, database_id):
             click.echo(f"  Total Cards: {analysis['total_cards']}")
             if analysis['parameters']:
                 click.echo(f"  Dashboard Filters: {len(analysis['parameters'])}")
+            if analysis.get('tabs'):
+                click.echo(f"  Dashboard Tabs: {len(analysis['tabs'])} ({', '.join(t.get('name', 'Tab') for t in analysis['tabs'])})")
 
             stats = analysis['statistics']
             click.echo(f"\n{Fore.CYAN}Statistics:{Style.RESET_ALL}")
