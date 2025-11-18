@@ -8,7 +8,7 @@ from metabase_migrator.api_client import MetabaseAPIClient
 def main():
     config = Config('config.yaml')
 
-    with MetabaseAPIClient(config.metabase_url, config.metabase_username, config.metabase_password) as client:
+    with MetabaseAPIClient(config.get_metabase_url(), config.get_metabase_username(), config.get_metabase_password()) as client:
         # Get the source dashboard that we know has cards
         dashboard_id = int(input("Enter source dashboard ID (the one with 91 cards): "))
 
