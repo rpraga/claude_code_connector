@@ -349,6 +349,20 @@ class DashboardMigrator:
                             'error': f"Failed to add to dashboard: {e}"
                         })
 
+        # Verify dashboard was populated (if not dry run)
+        if not dry_run and report.get('target_dashboard_id'):
+            try:
+                # Get the dashboard to verify cards were actually added
+                dashboard = self.api_client.get_dashboard(report['target_dashboard_id'])
+                actual_cards = dashboard.get('ordered_cards', dashboard.get('dashcards', []))
+                actual_count = len(actual_cards) if actual_cards else 0
+
+                if actual_count != len(report['cards_added']):
+                    print(f"\n⚠ Warning: Expected {len(report['cards_added'])} cards but dashboard has {actual_count} cards")
+                    print(f"  Dashboard may not have been populated correctly")
+            except Exception as e:
+                print(f"\n⚠ Warning: Could not verify dashboard cards: {e}")
+
         # Statistics
         report['statistics'] = {
             'total': len(analysis['migratable']),

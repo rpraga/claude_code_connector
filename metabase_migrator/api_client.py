@@ -387,15 +387,15 @@ class MetabaseAPIClient:
         Returns:
             Created dashcard data
         """
-        # Get current dashboard to append to existing cards
-        dashboard = self.get_dashboard(dashboard_id)
-
-        # Build new dashcard object
+        # Build dashcard payload - trying different structures for compatibility
         dashcard_data = {
-            'card_id': card_id,
+            'cardId': card_id,  # Try camelCase first
+            'card_id': card_id,  # Also include snake_case
             'row': row,
             'col': col,
+            'sizeX': size_x,
             'size_x': size_x,
+            'sizeY': size_y,
             'size_y': size_y
         }
 
@@ -408,27 +408,79 @@ class MetabaseAPIClient:
         if dashboard_tab_id is not None:
             dashcard_data['dashboard_tab_id'] = dashboard_tab_id
 
-        # Get existing cards - check multiple field names for compatibility
-        ordered_cards = dashboard.get('ordered_cards', [])
-        if not ordered_cards:
-            ordered_cards = dashboard.get('dashcards', [])
+        # Try multiple endpoints for compatibility across Metabase versions
+        endpoints_to_try = [
+            f"/api/dashboard/{dashboard_id}/cards",
+            f"/api/card/{card_id}/dashboard/{dashboard_id}",
+        ]
 
-        # Append new card
-        ordered_cards.append(dashcard_data)
+        last_error = None
+        for endpoint in endpoints_to_try:
+            try:
+                response = self.session.post(
+                    f"{self.base_url}{endpoint}",
+                    json=dashcard_data
+                )
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.HTTPError as e:
+                last_error = e
+                continue
 
-        # Update dashboard with new cards
-        response = self.session.put(
-            f"{self.base_url}/api/dashboard/{dashboard_id}",
-            json={'ordered_cards': ordered_cards}
-        )
-        response.raise_for_status()
-        result = response.json()
+        # If all POST endpoints fail, try the PUT approach as last resort
+        try:
+            dashboard = self.get_dashboard(dashboard_id)
 
-        # Return the newly added card
-        updated_cards = result.get('ordered_cards', result.get('dashcards', []))
-        if updated_cards:
-            return updated_cards[-1]
-        return dashcard_data
+            # Get existing cards
+            ordered_cards = dashboard.get('ordered_cards', [])
+            if not ordered_cards:
+                ordered_cards = dashboard.get('dashcards', [])
+
+            # Make a copy to avoid modifying existing cards
+            ordered_cards = list(ordered_cards) if ordered_cards else []
+
+            # Append new card with minimal required fields
+            new_card = {
+                'card_id': card_id,
+                'row': row,
+                'col': col,
+                'size_x': size_x,
+                'size_y': size_y
+            }
+
+            if parameter_mappings:
+                new_card['parameter_mappings'] = parameter_mappings
+            if visualization_settings:
+                new_card['visualization_settings'] = visualization_settings
+            if dashboard_tab_id is not None:
+                new_card['dashboard_tab_id'] = dashboard_tab_id
+
+            ordered_cards.append(new_card)
+
+            # Try both field names
+            for field_name in ['ordered_cards', 'dashcards']:
+                try:
+                    response = self.session.put(
+                        f"{self.base_url}/api/dashboard/{dashboard_id}",
+                        json={field_name: ordered_cards}
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+
+                    # Return the newly added card
+                    updated_cards = result.get('ordered_cards', result.get('dashcards', []))
+                    if updated_cards:
+                        return updated_cards[-1]
+                    return new_card
+                except:
+                    continue
+        except Exception as e:
+            last_error = e
+
+        # If everything fails, raise the last error
+        if last_error:
+            raise last_error
+        raise Exception(f"Failed to add card {card_id} to dashboard {dashboard_id}")
 
     def update_dashboard(self, dashboard_id: int, updates: Dict) -> Dict:
         """Update dashboard properties.
