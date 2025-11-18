@@ -410,8 +410,8 @@ class MetabaseAPIClient:
 
         # Try multiple endpoints for compatibility across Metabase versions
         endpoints_to_try = [
-            f"/api/dashboard/{dashboard_id}/cards",
-            f"/api/card/{card_id}/dashboard/{dashboard_id}",
+            f"/api/dashboard/{dashboard_id}/cards",  # Plural - older versions
+            f"/api/dashboard/{dashboard_id}/card",   # Singular - some versions use this
         ]
 
         last_error = None
@@ -426,56 +426,6 @@ class MetabaseAPIClient:
             except requests.exceptions.HTTPError as e:
                 last_error = e
                 continue
-
-        # If all POST endpoints fail, try the PUT approach as last resort
-        try:
-            dashboard = self.get_dashboard(dashboard_id)
-
-            # Get existing cards
-            ordered_cards = dashboard.get('ordered_cards', [])
-            if not ordered_cards:
-                ordered_cards = dashboard.get('dashcards', [])
-
-            # Make a copy to avoid modifying existing cards
-            ordered_cards = list(ordered_cards) if ordered_cards else []
-
-            # Append new card with minimal required fields
-            new_card = {
-                'card_id': card_id,
-                'row': row,
-                'col': col,
-                'size_x': size_x,
-                'size_y': size_y
-            }
-
-            if parameter_mappings:
-                new_card['parameter_mappings'] = parameter_mappings
-            if visualization_settings:
-                new_card['visualization_settings'] = visualization_settings
-            if dashboard_tab_id is not None:
-                new_card['dashboard_tab_id'] = dashboard_tab_id
-
-            ordered_cards.append(new_card)
-
-            # Try both field names
-            for field_name in ['ordered_cards', 'dashcards']:
-                try:
-                    response = self.session.put(
-                        f"{self.base_url}/api/dashboard/{dashboard_id}",
-                        json={field_name: ordered_cards}
-                    )
-                    response.raise_for_status()
-                    result = response.json()
-
-                    # Return the newly added card
-                    updated_cards = result.get('ordered_cards', result.get('dashcards', []))
-                    if updated_cards:
-                        return updated_cards[-1]
-                    return new_card
-                except:
-                    continue
-        except Exception as e:
-            last_error = e
 
         # If everything fails, raise the last error
         if last_error:
