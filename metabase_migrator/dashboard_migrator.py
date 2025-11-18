@@ -302,11 +302,23 @@ class DashboardMigrator:
                     if idx < len(created_tabs):
                         tab_mapping[source_tab['id']] = created_tabs[idx]['id']
 
+                print(f"\n=== Tab Mapping Debug ===")
+                print(f"Source tabs: {len(source_tabs)}")
+                print(f"Created tabs: {len(created_tabs)}")
+                for source_id, target_id in tab_mapping.items():
+                    source_name = next((t['name'] for t in source_tabs if t['id'] == source_id), 'Unknown')
+                    target_name = next((t['name'] for t in created_tabs if t['id'] == target_id), 'Unknown')
+                    print(f"  {source_name} (ID:{source_id}) -> {target_name} (ID:{target_id})")
+
             # Build parameter mapping from created dashboard
             # Match parameters by slug or name since IDs will be different
             if analysis.get('parameters') and dashboard.get('parameters'):
                 source_params = analysis['parameters']
                 target_params = dashboard['parameters']
+
+                print(f"\n=== Parameter Mapping Debug ===")
+                print(f"Source parameters: {len(source_params)}")
+                print(f"Target parameters: {len(target_params)}")
 
                 for source_param in source_params:
                     source_id = source_param.get('id')
@@ -314,13 +326,22 @@ class DashboardMigrator:
                     source_name = source_param.get('name')
 
                     # Find matching parameter in target by slug or name
+                    matched = False
                     for target_param in target_params:
                         if (target_param.get('slug') == source_slug or
                             target_param.get('name') == source_name):
                             parameter_mapping[source_id] = target_param['id']
+                            print(f"  {source_name} ({source_id}) -> {target_param['name']} ({target_param['id']})")
+                            matched = True
                             break
 
+                    if not matched:
+                        print(f"  WARNING: No match for parameter {source_name} ({source_id}, slug:{source_slug})")
+
             # Add cards to dashboard using PUT /api/dashboard/:id/cards (v0.47+)
+            print(f"\n=== Adding {len(analysis['cards_info'])} cards to dashboard ===")
+            cards_added_count = 0
+
             for card_info in analysis['cards_info']:
                 source_question_id = card_info['id']
 
@@ -341,6 +362,10 @@ class DashboardMigrator:
                         source_tab_id = card_info.get('dashboard_tab_id')
                         target_tab_id = tab_mapping.get(source_tab_id) if source_tab_id else None
 
+                        # Debug output for first few cards
+                        if cards_added_count < 5:
+                            print(f"  Card {cards_added_count+1}: Q{source_question_id}, source_tab={source_tab_id}, target_tab={target_tab_id}, params={len(parameter_mappings)}/{len(card_info.get('parameter_mappings', []))}")
+
                         # Add card to dashboard
                         dashcard = self.api_client.add_card_to_dashboard(
                             dashboard_id=dashboard['id'],
@@ -353,6 +378,8 @@ class DashboardMigrator:
                             visualization_settings=card_info.get('visualization_settings'),
                             dashboard_tab_id=target_tab_id
                         )
+
+                        cards_added_count += 1
 
                         report['cards_added'].append({
                             'source_question_id': source_question_id,
@@ -368,6 +395,8 @@ class DashboardMigrator:
                             'name': card_info['name'],
                             'error': f"Failed to add to dashboard: {e}"
                         })
+
+            print(f"Successfully added {cards_added_count} cards to dashboard")
 
         # Verify dashboard was populated (if not dry run)
         if not dry_run and report.get('target_dashboard_id'):
