@@ -274,6 +274,7 @@ class DashboardMigrator:
             # Prepare tabs for dashboard creation
             tabs = None
             tab_mapping = {}  # Maps source tab ID to new tab ID
+            parameter_mapping = {}  # Maps source parameter ID to new parameter ID
 
             if analysis.get('tabs'):
                 tabs = []
@@ -301,6 +302,24 @@ class DashboardMigrator:
                     if idx < len(created_tabs):
                         tab_mapping[source_tab['id']] = created_tabs[idx]['id']
 
+            # Build parameter mapping from created dashboard
+            # Match parameters by slug or name since IDs will be different
+            if analysis.get('parameters') and dashboard.get('parameters'):
+                source_params = analysis['parameters']
+                target_params = dashboard['parameters']
+
+                for source_param in source_params:
+                    source_id = source_param.get('id')
+                    source_slug = source_param.get('slug')
+                    source_name = source_param.get('name')
+
+                    # Find matching parameter in target by slug or name
+                    for target_param in target_params:
+                        if (target_param.get('slug') == source_slug or
+                            target_param.get('name') == source_name):
+                            parameter_mapping[source_id] = target_param['id']
+                            break
+
             # Add cards to dashboard using PUT /api/dashboard/:id/cards (v0.47+)
             for card_info in analysis['cards_info']:
                 source_question_id = card_info['id']
@@ -310,11 +329,12 @@ class DashboardMigrator:
                     target_question_id = question_mapping[source_question_id]
 
                     try:
-                        # Update parameter mappings with new card ID
+                        # Update parameter mappings with new card ID and parameter IDs
                         parameter_mappings = self._update_parameter_mappings(
                             card_info.get('parameter_mappings', []),
                             source_question_id,
-                            target_question_id
+                            target_question_id,
+                            parameter_mapping
                         )
 
                         # Determine tab assignment
@@ -375,13 +395,15 @@ class DashboardMigrator:
         return report
 
     def _update_parameter_mappings(self, mappings: List[Dict],
-                                   old_card_id: int, new_card_id: int) -> List[Dict]:
-        """Update parameter mappings to use new card ID.
+                                   old_card_id: int, new_card_id: int,
+                                   parameter_id_mapping: Dict[str, str] = None) -> List[Dict]:
+        """Update parameter mappings to use new card ID and parameter IDs.
 
         Args:
             mappings: Original parameter mappings
             old_card_id: Old question card ID
             new_card_id: New question card ID
+            parameter_id_mapping: Mapping from source parameter IDs to target parameter IDs
 
         Returns:
             Updated parameter mappings
@@ -389,15 +411,26 @@ class DashboardMigrator:
         if not mappings:
             return []
 
-        # Parameter mappings reference the card_id in their target
-        # We need to update card_id references
+        parameter_id_mapping = parameter_id_mapping or {}
+
+        # Parameter mappings reference the card_id and parameter_id
+        # We need to update both to match the new dashboard
         updated_mappings = []
         for mapping in mappings:
             updated_mapping = mapping.copy()
-            # The structure is typically: {parameter_id: ..., card_id: ..., target: ...}
-            # card_id might not be present in all versions, but we'll update it if it is
+
+            # Update card_id if present
             if 'card_id' in updated_mapping:
                 updated_mapping['card_id'] = new_card_id
+
+            # Update parameter_id to reference the new dashboard's parameter
+            if 'parameter_id' in updated_mapping:
+                old_param_id = updated_mapping['parameter_id']
+                if old_param_id in parameter_id_mapping:
+                    updated_mapping['parameter_id'] = parameter_id_mapping[old_param_id]
+                else:
+                    # If we can't map the parameter, skip this mapping to avoid "unknown filter" error
+                    continue
 
             updated_mappings.append(updated_mapping)
 
