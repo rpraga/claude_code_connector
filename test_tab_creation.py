@@ -29,15 +29,39 @@ def main():
                 'position': idx
             })
 
-        print(f"\n=== Creating Test Dashboard ===")
+        print(f"\n=== Creating Test Dashboard (WITHOUT tabs first) ===")
+
+        # Try creating dashboard WITHOUT tabs first
+        try:
+            new_dashboard = client.create_dashboard(
+                name="Test Dashboard WITHOUT Tabs",
+                description="Testing dashboard creation without tabs"
+            )
+            print(f"✓ Dashboard created successfully (ID: {new_dashboard['id']})")
+            print(f"Dashboard has 'tabs' key: {'tabs' in new_dashboard}")
+
+            # Clean up
+            print(f"(You should manually delete dashboard {new_dashboard['id']})")
+        except Exception as e:
+            print(f"✗ Failed to create dashboard without tabs: {e}")
+            return
+
+        print(f"\n=== Creating Test Dashboard (WITH tabs) ===")
         print(f"Tabs to create: {json.dumps(tabs_to_create, indent=2)}")
 
         # Create dashboard with tabs
-        new_dashboard = client.create_dashboard(
-            name="Test Dashboard with Tabs",
-            description="Testing tab creation",
-            tabs=tabs_to_create if tabs_to_create else None
-        )
+        try:
+            new_dashboard = client.create_dashboard(
+                name="Test Dashboard WITH Tabs",
+                description="Testing tab creation",
+                tabs=tabs_to_create if tabs_to_create else None
+            )
+            print(f"✓ Dashboard with tabs created successfully (ID: {new_dashboard['id']})")
+        except Exception as e:
+            print(f"✗ Failed to create dashboard with tabs: {e}")
+            print(f"\nThis is the issue! The API rejects dashboards when tabs are included in creation.")
+            print(f"We need to create the dashboard first, then add tabs separately.")
+            return
 
         print(f"\n=== Created Dashboard (ID: {new_dashboard['id']}) ===")
         print(f"Dashboard keys: {list(new_dashboard.keys())}")
